@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../domain/repositories/tracking_repository.dart';
+import '../../../core/config/app_config.dart';
 
 enum UpdateStatus { initial, requesting, success, error }
 
@@ -13,6 +14,7 @@ class HostMapViewModel extends ChangeNotifier {
 
   // FIFO Buffer: Max 5 elements
   final List<LatLng> _locations = [];
+  int? _clientBatteryLevel;
 
   String _connectionStatus = 'Waiting for connection...';
   LatLng? _hostLocation;
@@ -26,6 +28,7 @@ class HostMapViewModel extends ChangeNotifier {
   }
 
   List<LatLng> get locations => List.unmodifiable(_locations);
+  int? get clientBatteryLevel => _clientBatteryLevel;
   String get connectionStatus => _connectionStatus;
   LatLng? get hostLocation => _hostLocation;
   UpdateStatus get updateStatus => _updateStatus;
@@ -101,15 +104,18 @@ class HostMapViewModel extends ChangeNotifier {
     });
 
     repository.locationUpdates.listen((update) {
-      _addLocation(update.coordinates);
+      _addLocation(update.coordinates, batteryLevel: update.batteryLevel);
     });
   }
 
-  void _addLocation(LatLng newLocation) {
-    if (_locations.length >= 5) {
+  void _addLocation(LatLng newLocation, {int? batteryLevel}) {
+    if (_locations.length >= AppConfig.maxClientLocationsToSave) {
       _locations.removeAt(0); // Remove oldest
     }
     _locations.add(newLocation);
+    if (batteryLevel != null) {
+      _clientBatteryLevel = batteryLevel;
+    }
     if (_updateStatus == UpdateStatus.requesting) {
       _updateStatus = UpdateStatus.success;
       _updateTimer?.cancel();

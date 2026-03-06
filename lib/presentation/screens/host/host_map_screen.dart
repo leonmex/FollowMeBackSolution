@@ -121,9 +121,41 @@ class _HostMapScreenState extends State<HostMapScreen> {
             title: const Text('Following Map (Host)'),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(20.0),
-              child: Text(
-                viewModel.connectionStatus,
-                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    viewModel.connectionStatus,
+                    style: const TextStyle(fontSize: 12, color: Colors.white70),
+                  ),
+                  if (viewModel.clientBatteryLevel != null) ...[
+                    const SizedBox(width: 8),
+                    Icon(
+                      viewModel.clientBatteryLevel! > 20
+                          ? Icons.battery_full
+                          : Icons.battery_alert,
+                      size: 14,
+                      color: viewModel.clientBatteryLevel! > 50
+                          ? Colors.green
+                          : viewModel.clientBatteryLevel! > 20
+                          ? Colors.orange
+                          : Colors.red,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${viewModel.clientBatteryLevel}%',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: viewModel.clientBatteryLevel! > 50
+                            ? Colors.green
+                            : viewModel.clientBatteryLevel! > 20
+                            ? Colors.orange
+                            : Colors.red,
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),

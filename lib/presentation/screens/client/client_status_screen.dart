@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:battery_plus/battery_plus.dart';
 import '../../../domain/entities/location_update.dart';
 import '../../../domain/repositories/tracking_repository.dart';
 import '../../../main.dart';
@@ -177,9 +178,13 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
             locationSettings: locationSettings,
           );
 
+          final battery = Battery();
+          final batteryLevel = await battery.batteryLevel;
+
           final update = LocationUpdate(
             coordinates: LatLng(position.latitude, position.longitude),
             timestamp: DateTime.now(),
+            batteryLevel: batteryLevel,
           );
 
           await repo.sendLocationUpdate(update);

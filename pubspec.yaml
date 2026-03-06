@@ -47,6 +47,7 @@ dependencies:
   http: ^1.6.0
   nfc_manager: ^4.1.1
   ndef_record: ^1.4.2
+  battery_plus: ^7.0.0
 
 dev_dependencies:
   flutter_test:
