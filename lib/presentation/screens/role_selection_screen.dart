@@ -4,12 +4,17 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../../domain/repositories/tracking_repository.dart';
 import 'host/qr_generate_screen.dart';
 import 'client/qr_scan_screen.dart';
-import '../../../domain/entities/session_role.dart';
+import '../../domain/entities/connection_method.dart';
+import '../../domain/entities/session_role.dart';
+import 'host/nfc_generate_screen.dart';
+import 'client/nfc_scan_screen.dart';
 import 'host/host_map_screen.dart';
 import 'client/client_status_screen.dart';
 
 class RoleSelectionScreen extends StatefulWidget {
-  const RoleSelectionScreen({super.key});
+  final ConnectionMethod selectedMethod;
+
+  const RoleSelectionScreen({super.key, required this.selectedMethod});
 
   @override
   State<RoleSelectionScreen> createState() => _RoleSelectionScreenState();
@@ -111,20 +116,32 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         children: [
           _RoleCard(
             title: 'Following (Host)',
-            subtitle: 'Track another device, view locations on a Map.',
+            subtitle: widget.selectedMethod == ConnectionMethod.nfc
+                ? 'Create a sharing link and wait for a tap.'
+                : 'Track another device, view locations on a Map.',
             icon: Icons.map,
             color: const Color.fromARGB(255, 63, 181, 108),
-            onTap: () =>
-                _checkPermissionsAndNavigate(context, const QrGenerateScreen()),
+            onTap: () => _checkPermissionsAndNavigate(
+              context,
+              widget.selectedMethod == ConnectionMethod.nfc
+                  ? const NfcGenerateScreen()
+                  : const QrGenerateScreen(),
+            ),
           ),
           const SizedBox(height: 24),
           _RoleCard(
             title: 'Follower (Client)',
-            subtitle: 'Share your location directly with a Host.',
+            subtitle: widget.selectedMethod == ConnectionMethod.nfc
+                ? 'Tap your device to the Host.'
+                : 'Share your location directly with a Host.',
             icon: Icons.person_pin,
             color: const Color.fromARGB(255, 105, 133, 225),
-            onTap: () =>
-                _checkPermissionsAndNavigate(context, const QrScanScreen()),
+            onTap: () => _checkPermissionsAndNavigate(
+              context,
+              widget.selectedMethod == ConnectionMethod.nfc
+                  ? const NfcScanScreen()
+                  : const QrScanScreen(),
+            ),
           ),
         ],
       ),

@@ -45,22 +45,11 @@ void main() {
       },
     );
 
-    // We only test initialization behavior assuming Platform is Android since the
-    // plugin requires android platform. We spoof Platform or just verify the
-    // mock method gets called because we can't easily override Platform.isAndroid in standard flutter.
-    // However, since Platform.isAndroid can't be easily mocked without extra packages,
-    // the code checks Platform.isAndroid. If tests run on Mac/Windows/Linux, it will skip.
-    // So this test may not execute the method channel unless we explicitly test logic.
-    // For coverage of the widget we just pump it and verify it doesn't crash.
     await tester.pumpWidget(createWidgetUnderTest());
 
-    expect(
-      find.byType(FlutterMap),
-      findsNothing,
-    ); // Should be CircularProgressIndicator when no location
+    expect(find.byType(FlutterMap), findsNothing);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
-    // Provide a location
     when(
       () => mockViewModel.hostLocation,
     ).thenReturn(const latlong.LatLng(0, 0));
@@ -74,4 +63,44 @@ void main() {
       null,
     );
   });
+
+  testWidgets(
+    'HostMapScreen draws polyline only for client locations, not host bounds (Data Provider)',
+    (tester) async {
+      final clientLocations = [
+        const latlong.LatLng(1.0, 1.0),
+        const latlong.LatLng(2.0, 2.0),
+        const latlong.LatLng(3.0, 3.0),
+        const latlong.LatLng(4.0, 4.0),
+        const latlong.LatLng(5.0, 5.0),
+      ];
+      final hostLoc = const latlong.LatLng(0.0, 0.0);
+
+      when(() => mockViewModel.locations).thenReturn(clientLocations);
+      when(() => mockViewModel.hostLocation).thenReturn(hostLoc);
+      when(() => mockViewModel.connectionStatus).thenReturn('Connected');
+
+      await tester.pumpWidget(createWidgetUnderTest());
+
+      final polylineLayerFinder = find.byType(PolylineLayer);
+      expect(polylineLayerFinder, findsOneWidget);
+
+      final polylineLayer = tester.widget<PolylineLayer>(polylineLayerFinder);
+
+      expect(polylineLayer.polylines.length, 1);
+
+      final points = polylineLayer.polylines.first.points;
+
+      expect(points.length, clientLocations.length);
+      for (final loc in clientLocations) {
+        expect(points.contains(loc), isTrue);
+      }
+
+      expect(
+        points.contains(hostLoc),
+        isFalse,
+        reason: 'Polyline should not tether to Host location',
+      );
+    },
+  );
 }

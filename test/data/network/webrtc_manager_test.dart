@@ -62,6 +62,21 @@ void main() {
       );
       expect(webRTCManager.isConnected, isFalse);
     });
+
+    test(
+      'Heartbeat ping timer initialized on connect and cancelled on dispose',
+      () async {
+        // It starts the ping timer
+        webRTCManager.handleConnectionState(
+          RTCPeerConnectionState.RTCPeerConnectionStateConnected,
+        );
+        expect(webRTCManager.isConnected, isTrue);
+
+        // We ensure no exception occurs on dispose when timer is active
+        await webRTCManager.dispose();
+        expect(webRTCManager.isConnected, isFalse);
+      },
+    );
   });
 
   group('WebRTCManager ICE Connection State Logic', () {

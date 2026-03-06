@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../../domain/entities/session_role.dart';
 import 'follow_me_back_server.dart';
+import '../../core/config/app_config.dart';
 
 class WebRTCManager {
   RTCPeerConnection? _peerConnection;
@@ -21,6 +22,7 @@ class WebRTCManager {
   String? _sessionUuid;
   bool _isDisconnecting = false;
   final List<Map<String, dynamic>> _localCandidates = [];
+  Timer? _pingTimer;
 
   WebRTCManager();
 
@@ -242,6 +244,9 @@ class WebRTCManager {
           if (!_isDisconnecting) {
             _connectionStateController.add('PEER_DISCONNECTED');
           }
+        } else if (data['type'] == 'ping') {
+          // Respond with a pong to visually debug if needed, or just ignore since receiving also keeps it alive
+          debugPrint('Received ping over WebRTC DataChannel');
         }
       } catch (e) {
         debugPrint('Error parsing channel message: \$e');
@@ -277,8 +282,25 @@ class WebRTCManager {
     _peerConnection = null;
     _isConnected = false;
     _currentRole = null;
-    _connectionStateController.add('DISCONNECTED');
+    if (!_connectionStateController.isClosed) {
+      _connectionStateController.add('DISCONNECTED');
+    }
     _isDisconnecting = false;
+  }
+
+  void _startPingTimer() {
+    _pingTimer?.cancel();
+    _pingTimer = Timer.periodic(
+      const Duration(seconds: AppConfig.keepAlivePingIntervalSeconds),
+      (timer) {
+        if (_isConnected &&
+            _dataChannel?.state == RTCDataChannelState.RTCDataChannelOpen) {
+          sendMessage(jsonEncode({'type': 'ping'}));
+        } else {
+          timer.cancel();
+        }
+      },
+    );
   }
 
   @visibleForTesting
@@ -286,6 +308,7 @@ class WebRTCManager {
     switch (state) {
       case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
         _isConnected = true;
+        _startPingTimer();
         break;
       case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
       case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
@@ -317,6 +340,7 @@ class WebRTCManager {
   }
 
   Future<void> dispose() async {
+    _pingTimer?.cancel();
     await disconnect();
     _connectionStateController.close();
     _locationUpdatesController.close();

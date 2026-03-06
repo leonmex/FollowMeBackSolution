@@ -6,6 +6,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:follow_me_back/domain/repositories/tracking_repository.dart';
 import 'package:follow_me_back/presentation/screens/role_selection_screen.dart';
 import 'package:follow_me_back/domain/entities/session_role.dart';
+import 'package:follow_me_back/domain/entities/connection_method.dart';
 
 class MockTrackingRepository extends Mock implements TrackingRepository {}
 
@@ -20,23 +21,27 @@ void main() {
     ).thenAnswer((_) => const Stream.empty());
   });
 
-  Widget createWidgetUnderTest() {
+  Widget createWidgetUnderTest({
+    ConnectionMethod method = ConnectionMethod.qr,
+  }) {
     return MaterialApp(
       home: Provider<TrackingRepository>.value(
         value: mockTrackingRepository,
-        child: const RoleSelectionScreen(),
+        child: RoleSelectionScreen(selectedMethod: method),
       ),
     );
   }
 
   group('RoleSelectionScreen Tests', () {
-    testWidgets('Shows Role Cards when NOT connected', (
+    testWidgets('Shows Role Cards when NOT connected (QR Method)', (
       WidgetTester tester,
     ) async {
       when(() => mockTrackingRepository.isConnected).thenReturn(false);
       when(() => mockTrackingRepository.currentRole).thenReturn(null);
 
-      await tester.pumpWidget(createWidgetUnderTest());
+      await tester.pumpWidget(
+        createWidgetUnderTest(method: ConnectionMethod.qr),
+      );
 
       // Should show the title "Select Your Role"
       expect(find.text('Select Your Role'), findsOneWidget);
@@ -44,8 +49,40 @@ void main() {
       expect(find.text('Following (Host)'), findsOneWidget);
       expect(find.text('Follower (Client)'), findsOneWidget);
 
+      // Verify QR specific subtitles
+      expect(
+        find.text('Track another device, view locations on a Map.'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Share your location directly with a Host.'),
+        findsOneWidget,
+      );
+
       // Should NOT show Active Session UI
       expect(find.text('Return to Session'), findsNothing);
+    });
+
+    testWidgets('Shows Role Cards when NOT connected (NFC Method)', (
+      WidgetTester tester,
+    ) async {
+      when(() => mockTrackingRepository.isConnected).thenReturn(false);
+      when(() => mockTrackingRepository.currentRole).thenReturn(null);
+
+      await tester.pumpWidget(
+        createWidgetUnderTest(method: ConnectionMethod.nfc),
+      );
+
+      // Should show generic Host and Client cards
+      expect(find.text('Following (Host)'), findsOneWidget);
+      expect(find.text('Follower (Client)'), findsOneWidget);
+
+      // Verify NFC specific subtitles
+      expect(
+        find.text('Create a sharing link and wait for a tap.'),
+        findsOneWidget,
+      );
+      expect(find.text('Tap your device to the Host.'), findsOneWidget);
     });
 
     testWidgets('Shows Active Session UI when connected as Host', (

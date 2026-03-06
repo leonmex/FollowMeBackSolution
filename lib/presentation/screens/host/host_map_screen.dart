@@ -141,15 +141,11 @@ class _HostMapScreenState extends State<HostMapScreen> {
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       userAgentPackageName: 'com.example.follow_me_back',
                     ),
-                    if (viewModel.locations.isNotEmpty &&
-                        viewModel.hostLocation != null)
+                    if (viewModel.locations.length > 1)
                       PolylineLayer(
                         polylines: [
                           Polyline(
-                            points: [
-                              viewModel.hostLocation!,
-                              ...viewModel.locations,
-                            ],
+                            points: viewModel.locations,
                             strokeWidth: 4.0,
                             color: Colors.blue,
                           ),

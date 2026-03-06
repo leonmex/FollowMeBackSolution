@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'role_selection_screen.dart';
+import 'establish_connection_screen.dart';
 
 class IntroScreen extends StatelessWidget {
   const IntroScreen({super.key});
@@ -56,7 +56,7 @@ class IntroScreen extends StatelessWidget {
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => const RoleSelectionScreen(),
+                        builder: (context) => const EstablishConnectionScreen(),
                       ),
                     );
                   },

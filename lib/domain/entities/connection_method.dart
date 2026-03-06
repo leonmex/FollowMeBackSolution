@@ -1,0 +1,1 @@
+enum ConnectionMethod { qr, nfc }
