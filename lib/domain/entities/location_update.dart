@@ -22,7 +22,10 @@ class LocationUpdate {
 
   factory LocationUpdate.fromJson(Map<String, dynamic> json) {
     return LocationUpdate(
-      coordinates: LatLng(json['lat'] as double, json['lng'] as double),
+      coordinates: LatLng(
+        (json['lat'] as num).toDouble(),
+        (json['lng'] as num).toDouble(),
+      ),
       timestamp: DateTime.parse(json['timestamp'] as String),
       batteryLevel: json['batteryLevel'] as int?,
     );

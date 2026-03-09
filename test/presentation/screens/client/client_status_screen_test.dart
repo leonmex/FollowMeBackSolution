@@ -66,6 +66,17 @@ void main() {
   testWidgets('ClientStatusScreen responds to background ping requests', (
     tester,
   ) async {
+    // Mock Battery method channel
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('dev.fluttercommunity.plus/battery'),
+      (MethodCall methodCall) async {
+        if (methodCall.method == 'getBatteryLevel') {
+          return 80;
+        }
+        return null;
+      },
+    );
+
     // Mock Geolocator method channel
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('flutter.baseflow.com/geolocator'),
@@ -107,6 +118,10 @@ void main() {
     await tester.pump(const Duration(seconds: 2));
 
     // Cleanup
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('dev.fluttercommunity.plus/battery'),
+      null,
+    );
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('flutter.baseflow.com/geolocator'),
       null,
