@@ -29,13 +29,13 @@ class TrackingRepositoryImpl implements TrackingRepository {
   }
 
   @override
-  Future<void> hostAcceptClientAnswer(String answerJson) async {
-    await _webRTCManager.acceptAnswer(answerJson);
+  Future<void> clientProcessHostOffer(String uuid) async {
+    await _webRTCManager.processOfferAndCreateAnswer(uuid);
   }
 
   @override
-  Future<String> clientProcessHostOffer(String offerJson) async {
-    return await _webRTCManager.processOfferAndCreateAnswer(offerJson);
+  Future<void> waitForPairing() async {
+    await _webRTCManager.waitForInitialAnswer();
   }
 
   @override

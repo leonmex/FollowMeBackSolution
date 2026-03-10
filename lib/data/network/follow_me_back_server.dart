@@ -7,17 +7,20 @@ class FollowMeBackServer {
   /// Fetches dynamic TURN credentials from the FollowMeBack.io REST API
   static Future<List<Map<String, dynamic>>> fetchIceServers() async {
     try {
-      final response = await http.get(
-        Uri.parse(
-          '${AppConfig.followMeBackRestUrl}?apiKey=${AppConfig.followMeBackApiKey}',
-        ),
-      );
+      final response = await http
+          .get(
+            Uri.parse(
+              '${AppConfig.followMeBackRestUrl}?apiKey=${AppConfig.followMeBackApiKey}',
+            ),
+          )
+          .timeout(Duration(seconds: AppConfig.signalingTimeoutSeconds));
 
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         // Cast to the format expected by flutter_webrtc
         return data.map((e) => Map<String, dynamic>.from(e)).toList();
       } else {
+        debugPrint('Fetch ICE error response: ${response.body}');
         throw Exception(
           'Failed to fetch TURN credentials: ${response.statusCode}',
         );
@@ -40,11 +43,13 @@ class FollowMeBackServer {
     required String iceData,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse(AppConfig.restablishCommunicationUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'uuid': uuid, 'role': role, 'iceData': iceData}),
-      );
+      final response = await http
+          .post(
+            Uri.parse(AppConfig.restablishCommunicationUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'uuid': uuid, 'role': role, 'iceData': iceData}),
+          )
+          .timeout(Duration(seconds: AppConfig.signalingTimeoutSeconds));
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (e) {
       debugPrint('Error posting reconnection data: $e');
@@ -58,11 +63,13 @@ class FollowMeBackServer {
     required String targetRole,
   }) async {
     try {
-      final response = await http.get(
-        Uri.parse(
-          '${AppConfig.restablishCommunicationUrl}?uuid=$uuid&role=$targetRole',
-        ),
-      );
+      final response = await http
+          .get(
+            Uri.parse(
+              '${AppConfig.restablishCommunicationUrl}?uuid=$uuid&role=$targetRole',
+            ),
+          )
+          .timeout(Duration(seconds: AppConfig.signalingTimeoutSeconds));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['iceData'] != null && data['iceData'].toString().isNotEmpty) {
@@ -79,11 +86,13 @@ class FollowMeBackServer {
   /// Registers the Session UUID on the backend to allow future reconnections
   static Future<bool> initializeSession(String uuid) async {
     try {
-      final response = await http.post(
-        Uri.parse('${AppConfig.restablishCommunicationUrl}/handShake'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'uuid': uuid}),
-      );
+      final response = await http
+          .post(
+            Uri.parse('${AppConfig.restablishCommunicationUrl}/handShake'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'uuid': uuid}),
+          )
+          .timeout(Duration(seconds: AppConfig.signalingTimeoutSeconds));
       return response.statusCode == 200;
     } catch (e) {
       debugPrint('Error initializing session on backend: $e');

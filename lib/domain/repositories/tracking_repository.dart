@@ -16,12 +16,11 @@ abstract class TrackingRepository {
   /// Returns the Offer JSON string to be encoded in a QR Code.
   Future<String> createHostOffer();
 
-  /// Called by the Host when it scans the Client's generated Answer QR Code.
-  Future<void> hostAcceptClientAnswer(String answerJson);
+  /// Called by the Client when it scans the Host's Offer QR Code (UUID).
+  Future<void> clientProcessHostOffer(String uuid);
 
-  /// Called by the Client when it scans the Host's Offer QR Code.
-  /// Returns the Answer JSON string to be encoded in a QR consequence.
-  Future<String> clientProcessHostOffer(String offerJson);
+  /// Called by the Host to wait for the Client to scan its QR and respond.
+  Future<void> waitForPairing();
 
   /// Sends a string payload to the connected peer over the direct Data Channel.
   Future<void> sendMessage(String message);

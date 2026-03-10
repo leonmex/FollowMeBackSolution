@@ -20,7 +20,7 @@ class _NfcGenerateScreenState extends State<NfcGenerateScreen> {
   String? _offerData;
   bool _isGenerating = true;
   String _statusMessage = 'Generating Sharing Link...';
-  bool _scanningForAnswer = false;
+  bool _isNavigating = false;
 
   @override
   void initState() {
@@ -45,12 +45,34 @@ class _NfcGenerateScreenState extends State<NfcGenerateScreen> {
         _statusMessage = 'Ready. Tap Client device to share Offer.';
       });
       _startNfcSession();
+      _waitForClientPairing(); // Start polling loop immediately
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isGenerating = false;
         _statusMessage = 'Error generating Offer: $e';
       });
+    }
+  }
+
+  Future<void> _waitForClientPairing() async {
+    if (_isNavigating) return;
+    final repo = context.read<TrackingRepository>();
+    final navigator = Navigator.of(context);
+
+    try {
+      await repo.waitForPairing();
+      if (!mounted || _isNavigating) return;
+
+      _isNavigating = true;
+      await NfcManager.instance.stopSession();
+
+      navigator.pushReplacement(
+        MaterialPageRoute(builder: (context) => const HostMapScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      debugPrint("Error waiting for pairing: $e");
     }
   }
 
@@ -84,7 +106,6 @@ class _NfcGenerateScreenState extends State<NfcGenerateScreen> {
           final isAndroid =
               Theme.of(context).platform == TargetPlatform.android;
           bool isWritable = false;
-          NdefMessage? cachedMessage;
           dynamic ndefPlatform;
 
           if (isAndroid) {
@@ -94,7 +115,6 @@ class _NfcGenerateScreenState extends State<NfcGenerateScreen> {
               return;
             }
             isWritable = ndef.isWritable;
-            cachedMessage = ndef.cachedNdefMessage;
             ndefPlatform = ndef;
           } else {
             final ndef = NdefIos.from(tag);
@@ -103,61 +123,27 @@ class _NfcGenerateScreenState extends State<NfcGenerateScreen> {
               return;
             }
             isWritable = ndef.status == NdefStatusIos.readWrite;
-            cachedMessage = ndef.cachedNdefMessage;
             ndefPlatform = ndef;
           }
 
-          if (!_scanningForAnswer) {
-            // 1. Host is writing the Offer
-            if (!isWritable) {
-              _updateStatus('NFC Tag is not writable.');
-              return;
+          if (!isWritable) {
+            _updateStatus('NFC Tag is not writable.');
+            return;
+          }
+
+          try {
+            final record = _createTextRecord(_offerData!);
+            final message = NdefMessage(records: [record]);
+            if (isAndroid) {
+              await ndefPlatform.writeNdefMessage(message);
+            } else {
+              await ndefPlatform.writeNdef(message);
             }
-
-            try {
-              final record = _createTextRecord(_offerData!);
-              final message = NdefMessage(records: [record]);
-              if (isAndroid) {
-                await ndefPlatform.writeNdefMessage(message);
-              } else {
-                await ndefPlatform.writeNdef(message);
-              }
-              _updateStatus(
-                'Offer written successfully! Now wait for Client to tap back with Answer.',
-              );
-              setState(() {
-                _scanningForAnswer = true;
-              });
-            } catch (e) {
-              _updateStatus('Failed to write offer (Size limit?): $e');
-            }
-          } else {
-            // 2. Host is reading the Answer back
-            try {
-              if (cachedMessage == null || cachedMessage.records.isEmpty) {
-                return;
-              }
-
-              final record = cachedMessage.records.first;
-              final payload = record.payload;
-              final languageCodeLength = payload[0] & 0x3F;
-              final answerStr = String.fromCharCodes(
-                payload.sublist(1 + languageCodeLength),
-              );
-
-              await context.read<TrackingRepository>().hostAcceptClientAnswer(
-                answerStr,
-              );
-              await NfcManager.instance.stopSession();
-
-              if (!mounted) return;
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const HostMapScreen()),
-              );
-            } catch (e) {
-              _updateStatus('Failed to read Client Answer: $e');
-            }
+            _updateStatus(
+              'Offer written successfully! Client device will now process it.',
+            );
+          } catch (e) {
+            _updateStatus('Failed to write offer: $e');
           }
         },
       );
@@ -184,29 +170,27 @@ class _NfcGenerateScreenState extends State<NfcGenerateScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                _scanningForAnswer ? Icons.check_circle_outline : Icons.nfc,
-                size: 80,
-                color: _scanningForAnswer ? Colors.green : Colors.blueAccent,
-              ),
+              const Icon(Icons.nfc, size: 80, color: Colors.blueAccent),
               const SizedBox(height: 32),
               if (_isGenerating) const CircularProgressIndicator(),
-              if (!_isGenerating) const SizedBox(height: 36), // Filler
+              if (!_isGenerating) const SizedBox(height: 36),
               const SizedBox(height: 24),
-              Text(
-                _scanningForAnswer
-                    ? 'Waiting for Answer...'
-                    : 'Host Broadcasting',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
+              const Text(
+                'Host Broadcasting UUID',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 16),
               Text(
                 _statusMessage,
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+              const SizedBox(height: 32),
+              const CircularProgressIndicator(strokeWidth: 2),
+              const SizedBox(height: 8),
+              const Text(
+                'Waiting for Secure P2P Tunnel...',
+                style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
           ),

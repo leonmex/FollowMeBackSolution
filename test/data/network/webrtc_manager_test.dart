@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:follow_me_back/data/network/webrtc_manager.dart';
@@ -68,7 +66,7 @@ void main() {
         RTCPeerConnectionState.RTCPeerConnectionStateDisconnected,
       );
 
-      expect(webRTCManager.isConnected, isTrue);
+      expect(webRTCManager.isConnected, isFalse);
     });
 
     test('RTCPeerConnectionStateFailed DOES NOT drop session', () {
@@ -78,7 +76,7 @@ void main() {
       webRTCManager.handleConnectionState(
         RTCPeerConnectionState.RTCPeerConnectionStateFailed,
       );
-      expect(webRTCManager.isConnected, isTrue);
+      expect(webRTCManager.isConnected, isFalse);
     });
 
     test('RTCPeerConnectionStateClosed DOES NOT drop session', () {
@@ -88,7 +86,7 @@ void main() {
       webRTCManager.handleConnectionState(
         RTCPeerConnectionState.RTCPeerConnectionStateClosed,
       );
-      expect(webRTCManager.isConnected, isTrue);
+      expect(webRTCManager.isConnected, isFalse);
     });
 
     test(
@@ -120,8 +118,8 @@ void main() {
         RTCIceConnectionState.RTCIceConnectionStateDisconnected,
       );
 
-      // isConnected should remain true, as we want the session to persist
-      expect(webRTCManager.isConnected, isTrue);
+      // isConnected should be false to allow reconnection logic to run
+      expect(webRTCManager.isConnected, isFalse);
     });
 
     test('RTCIceConnectionStateFailed DOES NOT drop session', () {
@@ -134,7 +132,7 @@ void main() {
         RTCIceConnectionState.RTCIceConnectionStateFailed,
       );
 
-      expect(webRTCManager.isConnected, isTrue);
+      expect(webRTCManager.isConnected, isFalse);
     });
 
     test('RTCIceConnectionStateClosed DOES NOT drop session', () {
@@ -147,7 +145,7 @@ void main() {
         RTCIceConnectionState.RTCIceConnectionStateClosed,
       );
 
-      expect(webRTCManager.isConnected, isTrue);
+      expect(webRTCManager.isConnected, isFalse);
     });
   });
 
@@ -165,18 +163,9 @@ void main() {
 
     test('Client receives UUID from Host and registers on backend', () async {
       final dummyUuid = 'test-uuid-123';
-      final payloadMap = {
-        'uuid': dummyUuid,
-        'sdp': 'dummy-sdp',
-        'type': 'offer',
-        'candidates': [],
-      };
-
-      final offerBytes = utf8.encode(jsonEncode(payloadMap));
-      final compressedOffer = base64Encode(zlib.encode(offerBytes));
 
       try {
-        await webRTCManager.processOfferAndCreateAnswer(compressedOffer);
+        await webRTCManager.processOfferAndCreateAnswer(dummyUuid);
       } catch (_) {}
 
       expect(webRTCManager.sessionUuid, equals(dummyUuid));

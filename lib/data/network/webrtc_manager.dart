@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import '../../domain/entities/location_update.dart';
 import 'dart:async';
@@ -23,6 +22,10 @@ class WebRTCManager {
   bool _isDisconnecting = false;
   bool _isReconnecting = false;
   bool _initialHandshakeInProgress = false;
+  bool _isInitializing = false;
+  bool _isTickInProgress = false;
+  int _reconnectAttemptCount = 0;
+  String? _lastHandledReconnectionData;
   final List<Map<String, dynamic>> _localCandidates = [];
   Timer? _pingTimer;
   Timer? _reconnectionTimer;
@@ -39,42 +42,48 @@ class WebRTCManager {
 
   /// Initialize WebRTC connection
   Future<void> initWebRTC() async {
-    _localCandidates.clear();
-    final iceServers = await FollowMeBackServer.fetchIceServers();
+    if (_isInitializing) return;
+    _isInitializing = true;
+    try {
+      if (_peerConnection != null) return;
+      _localCandidates.clear();
+      final iceServers = await FollowMeBackServer.fetchIceServers();
 
-    final configuration = {
-      'iceServers': iceServers,
-      'iceTransportPolicy': 'all',
-      'iceCandidatePoolSize': 2,
-      'bundlePolicy': 'max-bundle',
-    };
+      final configuration = {
+        'iceServers': iceServers,
+        'iceTransportPolicy': 'all',
+        'iceCandidatePoolSize': AppConfig.iceCandidatePoolSize,
+        'bundlePolicy': 'max-bundle',
+      };
 
-    _peerConnection = await createPeerConnection(configuration);
+      _peerConnection = await createPeerConnection(configuration);
 
-    _peerConnection!.onConnectionState = handleConnectionState;
-    _peerConnection!.onIceConnectionState = handleIceConnectionState;
-    _peerConnection!.onIceCandidate = (RTCIceCandidate? candidate) {
-      if (candidate != null && candidate.candidate != null) {
-        _localCandidates.add({
-          'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid,
-          'sdpMLineIndex': candidate.sdpMLineIndex,
-        });
-      }
-    };
+      _peerConnection!.onConnectionState = handleConnectionState;
+      _peerConnection!.onIceConnectionState = handleIceConnectionState;
+      _peerConnection!.onIceCandidate = (RTCIceCandidate? candidate) {
+        if (candidate != null && candidate.candidate != null) {
+          _localCandidates.add({
+            'candidate': candidate.candidate,
+            'sdpMid': candidate.sdpMid,
+            'sdpMLineIndex': candidate.sdpMLineIndex,
+          });
+        }
+      };
 
-    // When the Client answers, the Host receives the data channel here
-    _peerConnection!.onDataChannel = (channel) {
-      _dataChannel = channel;
-      _setupDataChannelListeners();
-    };
-
+      // When the Client answers, the Host receives the data channel here
+      _peerConnection!.onDataChannel = (RTCDataChannel channel) {
+        _dataChannel = channel;
+        _setupDataChannelListeners();
+      };
+    } finally {
+      _isInitializing = false;
+    }
     // Fallback: we should handle ICE candidate gathering locally within the SDP
     // For pure QR-code P2P without a signaling server, we must wait for ICE gathering
     // to complete before generating the final QR code, or include candidates in the payload.
   }
 
-  /// HOST: Create Offer
+  /// HOST: Create initial Offer and post to backend. Returns the Session UUID for the QR code.
   Future<String> createOffer() async {
     _initialHandshakeInProgress = true;
     try {
@@ -82,12 +91,12 @@ class WebRTCManager {
       _sessionUuid = const Uuid().v4();
 
       debugPrint('Host: Generating new Session UUID: $_sessionUuid');
-      // Register the session on the backend for future reconnection hooks
+      // Step 1: Initialize session on backend (create mailbox)
       await FollowMeBackServer.initializeSession(_sessionUuid!);
 
       await initWebRTC();
 
-      // Create the data channel on the Host side *before* creating the offer
+      // Step 2: Create Data Channel and Offer
       RTCDataChannelInit dataChannelDict = RTCDataChannelInit()..ordered = true;
       _dataChannel = await _peerConnection!.createDataChannel(
         'tracking_channel',
@@ -98,9 +107,13 @@ class WebRTCManager {
       RTCSessionDescription offer = await _peerConnection!.createOffer();
       await _peerConnection!.setLocalDescription(offer);
 
-      // Wait for ICE gathering to complete so candidates are embedded in SDP
-      await _waitForIceGathering();
+      // Step 3: Wait for ICE gathering
+      await _waitForIceGathering().timeout(
+        Duration(seconds: AppConfig.iceGatheringTimeoutSeconds),
+        onTimeout: () => debugPrint('Host: ICE gathering timeout'),
+      );
 
+      // Step 4: Post Offer to backend mailbox
       final finalOffer = await _peerConnection!.getLocalDescription();
       final jsonStr = jsonEncode({
         'uuid': _sessionUuid,
@@ -109,61 +122,61 @@ class WebRTCManager {
         'candidates': _localCandidates,
       });
 
-      // Compress and Base64 encode to fit in QR Code
-      final bytes = utf8.encode(jsonStr);
-      final compressed = zlib.encode(bytes);
+      bool postSuccess = await FollowMeBackServer.postReconnectionData(
+        uuid: _sessionUuid!,
+        role: 'Host',
+        iceData: jsonStr,
+      );
+
+      if (!postSuccess) {
+        throw Exception('Failed to post initial Offer to signaling server');
+      }
+
       _initialHandshakeInProgress = false;
-      return base64Encode(compressed);
+      return _sessionUuid!; // Return ONLY the UUID for the QR code
     } catch (e) {
       _initialHandshakeInProgress = false;
       rethrow;
+    } finally {
+      _initialHandshakeInProgress = false;
     }
   }
 
-  Future<String> processOfferAndCreateAnswer(String encodedOffer) async {
+  /// CLIENT: Process Host UUID from QR, fetch Offer from backend, and post Answer.
+  Future<void> processOfferAndCreateAnswer(String hostUuid) async {
     _initialHandshakeInProgress = true;
     try {
-      // Ensure we start fresh if a previous attempt was made
       await disconnect();
-
       _currentRole = SessionRole.client;
+      _sessionUuid = hostUuid;
       await initWebRTC();
 
-      // Decode and Decompress
-      final compressed = base64Decode(encodedOffer);
-      final bytes = zlib.decode(compressed);
-      final offerJson = utf8.decode(bytes);
+      debugPrint('Client: Fetching initial Offer for UUID: $_sessionUuid');
+      // Step 1: Poll backend for Host Offer
+      final hostData = await FollowMeBackServer.pollReconnectionData(
+        uuid: _sessionUuid!,
+        targetRole: 'Host',
+      );
 
-      final offerMap = jsonDecode(offerJson);
-      _sessionUuid = offerMap['uuid'];
-      debugPrint('Client: Received Session UUID from Host: $_sessionUuid');
-
-      // Redundancy: Ensure session is registered on backend
-      if (_sessionUuid != null) {
-        try {
-          await FollowMeBackServer.initializeSession(_sessionUuid!);
-        } catch (e) {
-          debugPrint('Client: Non-critical error initializing session: $e');
-        }
+      if (hostData == null || hostData.isEmpty) {
+        throw Exception('Host Offer not found on signaling server');
       }
 
+      // Step 2: Apply Host Offer
+      final offerMap = jsonDecode(hostData);
       final offerData = RTCSessionDescription(
         offerMap['sdp'],
         offerMap['type'],
       );
-      debugPrint('Client: Setting remote description...');
       await _peerConnection!.setRemoteDescription(offerData);
-      debugPrint('Client: Remote description set.');
 
       final List<dynamic> parsedCandidates = offerMap['candidates'] ?? [];
       for (var c in parsedCandidates) {
         try {
-          int? sdpMLineIndex;
-          if (c['sdpMLineIndex'] != null) {
-            sdpMLineIndex = c['sdpMLineIndex'] is String
-                ? int.tryParse(c['sdpMLineIndex'])
-                : c['sdpMLineIndex'] as int;
-          }
+          int? sdpMLineIndex = c['sdpMLineIndex'] is String
+              ? int.tryParse(c['sdpMLineIndex'])
+              : c['sdpMLineIndex'] as int?;
+
           await _peerConnection!.addCandidate(
             RTCIceCandidate(
               c['candidate']?.toString(),
@@ -171,17 +184,19 @@ class WebRTCManager {
               sdpMLineIndex,
             ),
           );
-        } catch (e) {
-          debugPrint("Failed to add candidate: ${c['candidate']}. Error: $e");
-        }
+        } catch (_) {}
       }
 
+      // Step 3: Create Answer
       final answer = await _peerConnection!.createAnswer();
       await _peerConnection!.setLocalDescription(answer);
 
-      // Wait for ICE gathering
-      await _waitForIceGathering();
+      await _waitForIceGathering().timeout(
+        Duration(seconds: AppConfig.iceGatheringTimeoutSeconds),
+        onTimeout: () => debugPrint('Client: ICE gathering timeout'),
+      );
 
+      // Step 4: Post Answer to backend mailbox
       final finalAnswer = await _peerConnection!.getLocalDescription();
       final jsonStr = jsonEncode({
         'uuid': _sessionUuid,
@@ -190,25 +205,60 @@ class WebRTCManager {
         'candidates': _localCandidates,
       });
 
-      // Compress and Base64 encode
-      final ansBytes = utf8.encode(jsonStr);
-      final ansCompressed = zlib.encode(ansBytes);
+      await FollowMeBackServer.postReconnectionData(
+        uuid: _sessionUuid!,
+        role: 'Client',
+        iceData: jsonStr,
+      );
+
       _initialHandshakeInProgress = false;
-      return base64Encode(ansCompressed);
     } catch (e) {
       _initialHandshakeInProgress = false;
       rethrow;
+    } finally {
+      _initialHandshakeInProgress = false;
     }
+  }
+
+  /// HOST: Polling loop to wait for initial Client Answer during pairing.
+  Future<void> waitForInitialAnswer({Duration? timeout}) async {
+    if (_sessionUuid == null || _currentRole != SessionRole.host) return;
+
+    final startTime = DateTime.now();
+    final effectiveTimeout =
+        timeout ?? Duration(seconds: AppConfig.iceGatheringTimeoutSeconds * 2);
+
+    debugPrint('Host: Waiting for initial Client Answer...');
+
+    while (DateTime.now().difference(startTime) < effectiveTimeout) {
+      if (_isConnected) return;
+
+      try {
+        final clientData = await FollowMeBackServer.pollReconnectionData(
+          uuid: _sessionUuid!,
+          targetRole: 'Client',
+        );
+
+        if (clientData != null && clientData.isNotEmpty) {
+          debugPrint('Host: Initial Client Answer found! Applying...');
+          await acceptAnswer(clientData);
+          return;
+        }
+      } catch (e) {
+        debugPrint('Host: Error polling for initial answer: $e');
+      }
+
+      await Future.delayed(
+        const Duration(seconds: AppConfig.signalingPollIntervalSeconds),
+      );
+    }
+
+    throw Exception('Timed out waiting for Follower to scan and respond.');
   }
 
   /// HOST: Accept Client Answer
   Future<void> acceptAnswer(String encodedAnswer) async {
-    // Decode and Decompress
-    final compressed = base64Decode(encodedAnswer);
-    final bytes = zlib.decode(compressed);
-    final answerJson = utf8.decode(bytes);
-
-    final answerMap = jsonDecode(answerJson);
+    final answerMap = jsonDecode(encodedAnswer);
     final answerData = RTCSessionDescription(
       answerMap['sdp'],
       answerMap['type'],
@@ -251,9 +301,11 @@ class WebRTCManager {
       }
     };
 
-    // Wait for complete, OR timeout after 8 seconds (accounting for 5G API latency)
+    // Wait for complete, OR timeout (accounting for 5G API latency)
     try {
-      await completer.future.timeout(const Duration(seconds: 8));
+      await completer.future.timeout(
+        Duration(seconds: AppConfig.iceGatheringTimeoutSeconds),
+      );
     } catch (e) {
       debugPrint(
         "ICE gathering timed out, proceeding with gathered candidates.",
@@ -319,7 +371,9 @@ class WebRTCManager {
     if (_isConnected &&
         _dataChannel?.state == RTCDataChannelState.RTCDataChannelOpen) {
       await sendDisconnectSignal();
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(
+        const Duration(milliseconds: AppConfig.disconnectSignalDelayMs),
+      );
     }
     await _dataChannel?.close();
     await _peerConnection?.close();
@@ -359,9 +413,9 @@ class WebRTCManager {
       case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
       case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
       case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
-        debugPrint('WebRTC Connection State changed to: $state.name');
-        // Do not set _isConnected = false.
-        // Try to reconnect via the Cloud Function if not already disconnecting
+        debugPrint('WebRTC Connection State disrupted: ${state.name}');
+        _isConnected = false; // Mark as not connected so reconnection can run
+
         if (!_isDisconnecting && !_isReconnecting) {
           debugPrint('Triggering attemptReconnection() from ConnectionState');
           attemptReconnection();
@@ -381,8 +435,9 @@ class WebRTCManager {
       case RTCIceConnectionState.RTCIceConnectionStateFailed:
       case RTCIceConnectionState.RTCIceConnectionStateClosed:
       case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
-        debugPrint('WebRTC ICE Connection State changed to: $state.name');
-        // Do not set _isConnected = false.
+        debugPrint('WebRTC ICE Connection State disrupted: ${state.name}');
+        _isConnected = false; // Mark as not connected
+
         if (!_isDisconnecting && !_isReconnecting) {
           debugPrint(
             'Triggering attemptReconnection() from IceConnectionState',
@@ -406,6 +461,33 @@ class WebRTCManager {
     _locationUpdatesController.close();
   }
 
+  /// Internal: Closes and recreates the WebRTC stack with fresh ICE/TURN credentials.
+  /// Follows the user's critical 1-4 steps for reconnection.
+  Future<void> _recreatePeerConnection() async {
+    debugPrint('WebRTC: Recreating PeerConnection with fresh credentials...');
+    // 1. Fetch fresh TURN credentials occurs inside initWebRTC -> fetchIceServers
+    // 2. Close old peer connection
+    await _dataChannel?.close();
+    await _peerConnection?.close();
+    _dataChannel = null;
+    _peerConnection = null;
+    _isConnected = false;
+
+    // 3. Create new peer connection with fresh credentials
+    // 4. Re-attach tracks and listeners
+    await initWebRTC();
+
+    if (_currentRole == SessionRole.host) {
+      // Re-create data channel on the Host side
+      RTCDataChannelInit dataChannelDict = RTCDataChannelInit()..ordered = true;
+      _dataChannel = await _peerConnection!.createDataChannel(
+        'tracking_channel',
+        dataChannelDict,
+      );
+      _setupDataChannelListeners();
+    }
+  }
+
   /// Handles ICE Restart and Session Restoration via Cloud Function
   Future<void> attemptReconnection() async {
     // Only reconnect if we had a successful initial handshake and aren't already trying
@@ -420,155 +502,226 @@ class WebRTCManager {
       return;
     }
     _isReconnecting = true;
+    _reconnectAttemptCount = 0;
+    _isTickInProgress = false;
 
     try {
       if (_currentRole == SessionRole.host) {
         debugPrint('Host: Starting resilient reconnection loop...');
         _reconnectionTimer?.cancel();
-        _reconnectionTimer = Timer.periodic(const Duration(seconds: 10), (
-          timer,
-        ) async {
-          if (_isDisconnecting || _isConnected) {
-            timer.cancel();
-            _isReconnecting = false;
-            return;
-          }
-
-          try {
-            debugPrint('Host: Refreshing ICE candidates and posting Offer...');
-            // Ensure session is initialized on backend
-            await FollowMeBackServer.initializeSession(_sessionUuid!);
-
-            _localCandidates.clear();
-            RTCSessionDescription offer = await _peerConnection!.createOffer({
-              'iceRestart': true,
-            });
-            await _peerConnection!.setLocalDescription(offer);
-
-            // Wait with a timeout for ICE gathering
-            await _waitForIceGathering().timeout(
-              const Duration(seconds: 5),
-              onTimeout: () {},
-            );
-
-            final finalOffer = await _peerConnection!.getLocalDescription();
-            final jsonStr = jsonEncode({
-              'uuid': _sessionUuid,
-              'sdp': finalOffer!.sdp,
-              'type': finalOffer.type,
-              'candidates': _localCandidates,
-            });
-
-            final compressed = base64Encode(zlib.encode(utf8.encode(jsonStr)));
-            bool postSuccess = await FollowMeBackServer.postReconnectionData(
-              uuid: _sessionUuid!,
-              role: 'Host',
-              iceData: compressed,
-            );
-            debugPrint('Host: Post Offer success: $postSuccess');
-
-            // Immediately poll for Client Answer
-            debugPrint('Host: Checking for Client Answer...');
-            final clientData = await FollowMeBackServer.pollReconnectionData(
-              uuid: _sessionUuid!,
-              targetRole: 'Client',
-            );
-
-            if (clientData != null && clientData.isNotEmpty) {
-              debugPrint('Host: Client Answer found! Applying...');
-              timer.cancel();
-              await acceptAnswer(clientData);
-              _isReconnecting = false;
-              debugPrint('Host: Reconnection complete.');
-            }
-          } catch (e) {
-            debugPrint('Host: Reconnection loop error: $e');
-          }
-        });
-      } else if (_currentRole == SessionRole.client) {
-        debugPrint('Client: Starting resilient reconnection poll...');
-        _reconnectionTimer?.cancel();
-        _reconnectionTimer = Timer.periodic(const Duration(seconds: 5), (
-          timer,
-        ) async {
-          if (_isDisconnecting || _isConnected) {
-            timer.cancel();
-            _isReconnecting = false;
-            return;
-          }
-
-          try {
-            debugPrint('Client: Polling for Host Offer...');
-            final hostData = await FollowMeBackServer.pollReconnectionData(
-              uuid: _sessionUuid!,
-              targetRole: 'Host',
-            );
-
-            if (hostData != null && hostData.isNotEmpty) {
-              debugPrint('Client: Host Offer found! Processing Answer...');
-              timer.cancel();
-
-              // Ensure session is initialized on backend (mailbox key exists)
-              await FollowMeBackServer.initializeSession(_sessionUuid!);
-
-              // Apply Host offer
-              final compressed = base64Decode(hostData);
-              final offerMap = jsonDecode(utf8.decode(zlib.decode(compressed)));
-              final offerData = RTCSessionDescription(
-                offerMap['sdp'],
-                offerMap['type'],
+        _reconnectionTimer = Timer.periodic(
+          const Duration(seconds: AppConfig.signalingPollIntervalSeconds),
+          (timer) async {
+            if (_isTickInProgress) return;
+            _isTickInProgress = true;
+            try {
+              debugPrint(
+                'Host: Reconnection loop tick #$_reconnectAttemptCount. Connected: $_isConnected, Disconnecting: $_isDisconnecting',
               );
-              await _peerConnection!.setRemoteDescription(offerData);
-
-              final List<dynamic> parsedCandidates =
-                  offerMap['candidates'] ?? [];
-              for (var c in parsedCandidates) {
-                try {
-                  int? sdpMLineIndex = c['sdpMLineIndex'] is String
-                      ? int.tryParse(c['sdpMLineIndex'])
-                      : c['sdpMLineIndex'] as int?;
-                  await _peerConnection!.addCandidate(
-                    RTCIceCandidate(
-                      c['candidate']?.toString(),
-                      c['sdpMid']?.toString(),
-                      sdpMLineIndex,
-                    ),
-                  );
-                } catch (_) {}
+              if (_isDisconnecting || _isConnected) {
+                debugPrint(
+                  'Host: Reconnection loop stopping. Reason: ${_isDisconnecting ? "Manual Disconnect" : "Reconnected"}',
+                );
+                timer.cancel();
+                _isReconnecting = false;
+                return;
               }
 
+              _reconnectAttemptCount++;
+
+              debugPrint(
+                'Host: Refreshing PeerConnection (Fresh TURN) and posting ICE Restart Offer...',
+              );
+              // Ensure session is initialized on backend
+              await FollowMeBackServer.initializeSession(_sessionUuid!);
+
+              // User's Step 1-4: Fresh TURN and new PC
+              await _recreatePeerConnection();
+
+              // User's Step 5: Create offer with iceRestart: true
               _localCandidates.clear();
-              final answer = await _peerConnection!.createAnswer();
-              await _peerConnection!.setLocalDescription(answer);
+              RTCSessionDescription offer = await _peerConnection!.createOffer({
+                'iceRestart': true,
+              });
+              await _peerConnection!.setLocalDescription(offer);
+
+              // Wait with a timeout for ICE gathering
               await _waitForIceGathering().timeout(
-                const Duration(seconds: 5),
+                Duration(seconds: AppConfig.iceGatheringTimeoutSeconds),
                 onTimeout: () {},
               );
 
-              final finalAnswer = await _peerConnection!.getLocalDescription();
+              final finalOffer = await _peerConnection!.getLocalDescription();
               final jsonStr = jsonEncode({
                 'uuid': _sessionUuid,
-                'sdp': finalAnswer!.sdp,
-                'type': finalAnswer.type,
+                'sdp': finalOffer!.sdp,
+                'type': finalOffer.type,
                 'candidates': _localCandidates,
               });
-              final ansCompressed = base64Encode(
-                zlib.encode(utf8.encode(jsonStr)),
+
+              final bodyBytes = jsonStr;
+
+              bool postSuccess = await FollowMeBackServer.postReconnectionData(
+                uuid: _sessionUuid!,
+                role: 'Host',
+                iceData: bodyBytes,
+              );
+              debugPrint('Host: Post Offer success: $postSuccess');
+
+              // Immediately poll for Client Answer
+              debugPrint('Host: Checking for Client Answer...');
+              final clientData = await FollowMeBackServer.pollReconnectionData(
+                uuid: _sessionUuid!,
+                targetRole: 'Client',
               );
 
-              bool postResult = await FollowMeBackServer.postReconnectionData(
-                uuid: _sessionUuid!,
-                role: 'Client',
-                iceData: ansCompressed,
-              );
-              debugPrint('Client: Posting Answer success: $postResult');
-              _isReconnecting = false;
-              debugPrint('Client: Reconnection complete.');
+              if (clientData != null &&
+                  clientData.isNotEmpty &&
+                  clientData != _lastHandledReconnectionData) {
+                debugPrint('Host: New Client Answer found! Applying...');
+                _lastHandledReconnectionData = clientData;
+                await acceptAnswer(clientData);
+                debugPrint('Host: Answer applied. Waiting for connection...');
+              }
+            } catch (e) {
+              debugPrint('Host: Reconnection loop error: $e');
+            } finally {
+              _isTickInProgress = false;
             }
-          } catch (e) {
-            debugPrint('Client: Reconnection loop error: $e');
-          }
-        });
+          },
+        );
+      } else if (_currentRole == SessionRole.client) {
+        debugPrint('Client: Starting resilient reconnection poll...');
+        _reconnectionTimer?.cancel();
+        _reconnectionTimer = Timer.periodic(
+          const Duration(seconds: AppConfig.signalingPollIntervalSeconds),
+          (timer) async {
+            if (_isTickInProgress) return;
+            _isTickInProgress = true;
+            try {
+              debugPrint(
+                'Client: Reconnection loop tick #$_reconnectAttemptCount. Connected: $_isConnected, Disconnecting: $_isDisconnecting',
+              );
+              if (_isDisconnecting || _isConnected) {
+                debugPrint(
+                  'Client: Reconnection loop stopping. Reason: ${_isDisconnecting ? "Manual Disconnect" : "Reconnected"}',
+                );
+                timer.cancel();
+                _isReconnecting = false;
+                return;
+              }
+
+              _reconnectAttemptCount++;
+
+              // Hard Reset fallback: if we've tried too many times without success, recreate the PC
+              if (_reconnectAttemptCount >
+                  AppConfig.reconnectionHardResetLimit) {
+                debugPrint(
+                  'Client: Reconnection stuck for too long. Performing Hard Reset of WebRTC stack...',
+                );
+                _reconnectAttemptCount = 0;
+                _lastHandledReconnectionData = null;
+                await disconnect();
+                await initWebRTC();
+                return; // End this tick, wait for next one with fresh PC
+              }
+
+              debugPrint('Client: Polling for Host Offer...');
+              final hostData = await FollowMeBackServer.pollReconnectionData(
+                uuid: _sessionUuid!,
+                targetRole: 'Host',
+              );
+
+              if (hostData != null && hostData.isNotEmpty) {
+                if (hostData == _lastHandledReconnectionData) {
+                  // We only skip if we are still not connected and the offer is the same
+                  // But wait, what if the Answer failed to reach the Host?
+                  // We check if we should retry anyway.
+                  debugPrint(
+                    'Client: Host Offer is unchanged. Skipping retry to avoid reset loops.',
+                  );
+                  return;
+                }
+
+                debugPrint(
+                  'Client: New Host Offer found! Hard resetting stack and processing Answer...',
+                );
+
+                // Ensure session is initialized on backend (mailbox key exists)
+                await FollowMeBackServer.initializeSession(_sessionUuid!);
+
+                // User's Step 1-4: Fresh TURN and new PC before applying remote offer
+                await _recreatePeerConnection();
+
+                // Apply Host offer
+                final offerMap = jsonDecode(hostData);
+                final offerData = RTCSessionDescription(
+                  offerMap['sdp'],
+                  offerMap['type'],
+                );
+                await _peerConnection!.setRemoteDescription(offerData);
+
+                final List<dynamic> parsedCandidates =
+                    offerMap['candidates'] ?? [];
+                for (var c in parsedCandidates) {
+                  try {
+                    int? sdpMLineIndex = c['sdpMLineIndex'] is String
+                        ? int.tryParse(c['sdpMLineIndex'])
+                        : c['sdpMLineIndex'] as int?;
+                    await _peerConnection!.addCandidate(
+                      RTCIceCandidate(
+                        c['candidate']?.toString(),
+                        c['sdpMid']?.toString(),
+                        sdpMLineIndex,
+                      ),
+                    );
+                  } catch (_) {}
+                }
+
+                _localCandidates.clear();
+                final answer = await _peerConnection!.createAnswer();
+                await _peerConnection!.setLocalDescription(answer);
+                await _waitForIceGathering().timeout(
+                  Duration(seconds: AppConfig.iceGatheringTimeoutSeconds),
+                  onTimeout: () {},
+                );
+
+                final finalAnswer = await _peerConnection!
+                    .getLocalDescription();
+                final jsonStr = jsonEncode({
+                  'uuid': _sessionUuid,
+                  'sdp': finalAnswer!.sdp,
+                  'type': finalAnswer.type,
+                  'candidates': _localCandidates,
+                });
+                final bodyBytes = jsonStr;
+
+                bool postResult = await FollowMeBackServer.postReconnectionData(
+                  uuid: _sessionUuid!,
+                  role: 'Client',
+                  iceData: bodyBytes,
+                );
+
+                if (postResult) {
+                  _lastHandledReconnectionData = hostData;
+                  debugPrint(
+                    'Client: Posting Answer success. Waiting for connection...',
+                  );
+                } else {
+                  debugPrint(
+                    'Client: Failed to post Answer to signaling server. Will retry next tick.',
+                  );
+                }
+              } else {
+                debugPrint('Client: No Host Offer found on signaling server.');
+              }
+            } catch (e) {
+              debugPrint('Client: Reconnection loop error: $e');
+            } finally {
+              _isTickInProgress = false;
+            }
+          },
+        );
       }
     } catch (e) {
       debugPrint('Reconnection setup failed: $e');

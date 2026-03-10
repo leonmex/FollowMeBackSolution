@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../domain/repositories/tracking_repository.dart';
 import 'host_map_screen.dart';
 
@@ -15,20 +14,16 @@ class QrGenerateScreen extends StatefulWidget {
 class _QrGenerateScreenState extends State<QrGenerateScreen> {
   String? _offerData;
   bool _isGenerating = true;
-  bool _scanningForAnswer = false;
-
-  late final MobileScannerController _scannerController;
+  bool _isNavigating = false;
 
   @override
   void initState() {
     super.initState();
-    _scannerController = MobileScannerController();
     _generateOffer();
   }
 
   @override
   void dispose() {
-    _scannerController.dispose();
     super.dispose();
   }
 
@@ -41,48 +36,40 @@ class _QrGenerateScreenState extends State<QrGenerateScreen> {
         _offerData = offer;
         _isGenerating = false;
       });
+      // Start waiting for client to scan and respond via backend
+      _waitForClientPairing();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error generating Offer: \$e')));
+      ).showSnackBar(SnackBar(content: Text('Error generating Offer: $e')));
     }
   }
 
-  void _onAnswerScanned(BarcodeCapture capture) async {
-    if (capture.barcodes.isEmpty) return;
+  Future<void> _waitForClientPairing() async {
+    if (_isNavigating) return;
+    final repo = context.read<TrackingRepository>();
+    final navigator = Navigator.of(context);
 
-    final answerJson = capture.barcodes.first.rawValue;
-    if (answerJson != null) {
-      final repo = context.read<TrackingRepository>();
-      final navigator = Navigator.of(context);
-      try {
-        await repo.hostAcceptClientAnswer(answerJson);
-        // Stop scanner to release camera resources
-        await _scannerController.stop();
+    try {
+      await repo.waitForPairing();
+      if (!mounted || _isNavigating) return;
 
-        // Navigation should only happen once per scan theoretically
-        navigator.pushReplacement(
-          MaterialPageRoute(builder: (context) => const HostMapScreen()),
-        );
-      } catch (e) {
-        debugPrint("Error accepting answer: \$e");
-      }
+      _isNavigating = true;
+      navigator.pushReplacement(
+        MaterialPageRoute(builder: (context) => const HostMapScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      debugPrint("Error waiting for pairing: $e");
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Pairing timeout: $e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_scanningForAnswer) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Scan Follower Android Answer')),
-        body: MobileScanner(
-          controller: _scannerController,
-          onDetect: _onAnswerScanned,
-        ),
-      );
-    }
-
     return Scaffold(
       appBar: AppBar(title: const Text('Pairing Mode (Host)')),
       body: Center(
@@ -110,14 +97,12 @@ class _QrGenerateScreenState extends State<QrGenerateScreen> {
                       size: 250.0,
                     ),
                   const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _scanningForAnswer = true;
-                      });
-                    },
-                    child: const Text('I am ready to scan their response'),
+                  const Text(
+                    'Waiting for secure connection...',
+                    style: TextStyle(color: Colors.grey),
                   ),
+                  const SizedBox(height: 16),
+                  const CircularProgressIndicator(strokeWidth: 2),
                 ],
               ),
       ),

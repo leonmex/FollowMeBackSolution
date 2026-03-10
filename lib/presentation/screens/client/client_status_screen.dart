@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
@@ -7,6 +8,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:battery_plus/battery_plus.dart';
 import '../../../domain/entities/location_update.dart';
 import '../../../domain/repositories/tracking_repository.dart';
+import '../../../core/config/app_config.dart';
 import '../../../main.dart';
 
 class ClientStatusScreen extends StatefulWidget {
@@ -20,6 +22,7 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
     with WidgetsBindingObserver {
   String _statusMessage = 'Listening for requests...';
   bool _isDisconnectDialogShowing = false;
+  StreamSubscription<String>? _connectionSubscription;
 
   @override
   void initState() {
@@ -34,10 +37,9 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
     if (Platform.isAndroid) {
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
-          channelId: 'follow_me_back_channel',
-          channelName: 'Location Tracking',
-          channelDescription:
-              'This notification appears when tracking is active',
+          channelId: AppConfig.notificationChannelId,
+          channelName: AppConfig.notificationChannelName,
+          channelDescription: AppConfig.notificationChannelDescription,
           channelImportance: NotificationChannelImportance.LOW,
           priority: NotificationPriority.LOW,
         ),
@@ -46,7 +48,9 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
           playSound: false,
         ),
         foregroundTaskOptions: ForegroundTaskOptions(
-          eventAction: ForegroundTaskEventAction.repeat(5000),
+          eventAction: ForegroundTaskEventAction.repeat(
+            AppConfig.foregroundTaskIntervalMs,
+          ),
           autoRunOnBoot: false,
           allowWakeLock: true,
           allowWifiLock: true,
@@ -61,8 +65,8 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
 
       ServiceRequestResult startResult =
           await FlutterForegroundTask.startService(
-            notificationTitle: 'Follow Me Back is active',
-            notificationText: 'Location sharing is running in the background',
+            notificationTitle: AppConfig.notificationTitle,
+            notificationText: AppConfig.notificationText,
             callback: startCallback,
           );
       if (startResult is ServiceRequestSuccess) {
@@ -74,6 +78,7 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _connectionSubscription?.cancel();
     if (Platform.isAndroid) {
       FlutterForegroundTask.stopService();
     }
@@ -128,7 +133,8 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
 
     // We listen to the connectionState stream for the custom "REQUEST_LOCATION_RECEIVED" state
     // we fire in the WebRTCManager.
-    repo.connectionState.listen((state) async {
+    _connectionSubscription?.cancel();
+    _connectionSubscription = repo.connectionState.listen((state) async {
       if (state == 'DISCONNECTED') {
         if (mounted) {
           setState(() {
@@ -196,13 +202,16 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
           }
 
           // Revert back
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) {
-              setState(() {
-                _statusMessage = 'Listening for requests...';
-              });
-            }
-          });
+          Future.delayed(
+            Duration(seconds: AppConfig.uiMessageResetDelaySeconds),
+            () {
+              if (mounted) {
+                setState(() {
+                  _statusMessage = 'Listening for requests...';
+                });
+              }
+            },
+          );
         } catch (e) {
           if (mounted) {
             setState(() {

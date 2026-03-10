@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:nfc_manager/nfc_manager.dart';
 import 'package:nfc_manager/nfc_manager_android.dart';
@@ -19,7 +17,7 @@ class NfcScanScreen extends StatefulWidget {
 class _NfcScanScreenState extends State<NfcScanScreen> {
   String _statusMessage =
       'Hold your device near the Host to read the connection offer.';
-  bool _isProcessingAndWriting = false;
+  bool _isProcessing = false;
 
   @override
   void initState() {
@@ -33,24 +31,6 @@ class _NfcScanScreenState extends State<NfcScanScreen> {
     super.dispose();
   }
 
-  NdefRecord _createTextRecord(String text) {
-    const languageCode = 'en';
-    final textBytes = utf8.encode(text);
-    final languageCodeBytes = utf8.encode(languageCode);
-    final payload = Uint8List(1 + languageCodeBytes.length + textBytes.length);
-
-    payload[0] = languageCodeBytes.length;
-    payload.setRange(1, 1 + languageCodeBytes.length, languageCodeBytes);
-    payload.setRange(1 + languageCodeBytes.length, payload.length, textBytes);
-
-    return NdefRecord(
-      typeNameFormat: TypeNameFormat.wellKnown,
-      type: Uint8List.fromList([0x54]), // 'T'
-      identifier: Uint8List.fromList([]),
-      payload: payload,
-    );
-  }
-
   Future<void> _startNfcSession() async {
     try {
       await NfcManager.instance.startSession(
@@ -62,9 +42,7 @@ class _NfcScanScreenState extends State<NfcScanScreen> {
         onDiscovered: (NfcTag tag) async {
           final isAndroid =
               Theme.of(context).platform == TargetPlatform.android;
-          bool isWritable = false;
           NdefMessage? cachedMessage;
-          dynamic ndefPlatform;
 
           if (isAndroid) {
             final ndef = NdefAndroid.from(tag);
@@ -72,22 +50,23 @@ class _NfcScanScreenState extends State<NfcScanScreen> {
               _updateStatus('Tag is not NDEF format. Cannot read.', false);
               return;
             }
-            isWritable = ndef.isWritable;
             cachedMessage = ndef.cachedNdefMessage;
-            ndefPlatform = ndef;
           } else {
             final ndef = NdefIos.from(tag);
             if (ndef == null) {
               _updateStatus('Tag is not NDEF format. Cannot read.', false);
               return;
             }
-            isWritable = ndef.status == NdefStatusIos.readWrite;
-            cachedMessage = ndef.cachedNdefMessage;
-            ndefPlatform = ndef;
+            cachedMessage = ndef.status == NdefStatusIos.readWrite
+                ? ndef.cachedNdefMessage
+                : null; // Fallback or handle differently if needed
+
+            // Re-read if needed, but usually cached is enough
+            cachedMessage ??= ndef.cachedNdefMessage;
           }
 
-          if (!_isProcessingAndWriting) {
-            // 1. Client reads the Host Offer
+          if (!_isProcessing) {
+            // 1. Client reads the Host Offer (UUID)
             try {
               if (cachedMessage == null || cachedMessage.records.isEmpty) {
                 return;
@@ -95,50 +74,36 @@ class _NfcScanScreenState extends State<NfcScanScreen> {
 
               final record = cachedMessage.records.first;
               final payload = record.payload;
+
+              // NDEF Text record handling
               final languageCodeLength = payload[0] & 0x3F;
-              final offerStr = String.fromCharCodes(
+              final uuid = String.fromCharCodes(
                 payload.sublist(1 + languageCodeLength),
               );
 
-              _updateStatus('Offer read! Generating Answer...', true);
-
-              // Process Offer & Create Answer
-              final repo = context.read<TrackingRepository>();
-              final answerStr = await repo.clientProcessHostOffer(offerStr);
-
-              // Write the Answer back to the tag
-              if (!isWritable) {
-                _updateStatus(
-                  'Offer processed, but cannot write answer back (Not Writable).',
-                  false,
-                );
-                return;
-              }
-
-              final answerRecord = _createTextRecord(answerStr);
-              final msg = NdefMessage(records: [answerRecord]);
-
-              if (isAndroid) {
-                await ndefPlatform.writeNdefMessage(msg);
-              } else {
-                await ndefPlatform.writeNdef(msg);
-              }
-
               _updateStatus(
-                'Answer written successfully! You are connected.',
-                false,
+                'UUID read! Re-establishing direct tunnel...',
+                true,
               );
+
+              // Process UUID via backend mailbox
+              final repo = context.read<TrackingRepository>();
+              final navigator = Navigator.of(context);
+
+              await repo.clientProcessHostOffer(uuid);
+
+              // 2. Pair complete (Answer posted to backend)
+              _updateStatus('Pairing complete! Connecting...', false);
               await NfcManager.instance.stopSession();
 
               if (!mounted) return;
-              Navigator.pushReplacement(
-                context,
+              navigator.pushReplacement(
                 MaterialPageRoute(
                   builder: (context) => const ClientStatusScreen(),
                 ),
               );
             } catch (e) {
-              _updateStatus('Failed to read or process offer: $e', false);
+              _updateStatus('Failed to process connection: $e', false);
             }
           }
         },
@@ -152,7 +117,7 @@ class _NfcScanScreenState extends State<NfcScanScreen> {
     if (mounted) {
       setState(() {
         _statusMessage = msg;
-        _isProcessingAndWriting = processing;
+        _isProcessing = processing;
       });
     }
   }
@@ -168,17 +133,16 @@ class _NfcScanScreenState extends State<NfcScanScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                _isProcessingAndWriting ? Icons.sync : Icons.tap_and_play,
+                _isProcessing ? Icons.sync : Icons.tap_and_play,
                 size: 80,
-                color: _isProcessingAndWriting ? Colors.orange : Colors.teal,
+                color: _isProcessing ? Colors.orange : Colors.teal,
               ),
               const SizedBox(height: 32),
-              if (_isProcessingAndWriting) const CircularProgressIndicator(),
-              if (!_isProcessingAndWriting)
-                const SizedBox(height: 36), // Filler
+              if (_isProcessing) const CircularProgressIndicator(),
+              if (!_isProcessing) const SizedBox(height: 36),
               const SizedBox(height: 24),
               Text(
-                _isProcessingAndWriting ? 'Processing...' : 'Ready to Connect',
+                _isProcessing ? 'Processing Pairing...' : 'Ready to Connect',
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
