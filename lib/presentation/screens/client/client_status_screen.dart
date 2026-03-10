@@ -90,7 +90,7 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
     if (state == AppLifecycleState.detached) {
       // The app is being destroyed by the user or OS.
       if (mounted) {
-        context.read<TrackingRepository>().sendDisconnectSignal();
+        context.read<TrackingRepository>().disconnect();
       }
     }
   }

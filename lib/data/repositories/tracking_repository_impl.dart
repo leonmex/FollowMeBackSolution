@@ -59,11 +59,6 @@ class TrackingRepositoryImpl implements TrackingRepository {
   }
 
   @override
-  Future<void> sendDisconnectSignal() async {
-    await _webRTCManager.sendDisconnectSignal();
-  }
-
-  @override
   Future<void> disconnect() async {
     await _webRTCManager.disconnect();
   }

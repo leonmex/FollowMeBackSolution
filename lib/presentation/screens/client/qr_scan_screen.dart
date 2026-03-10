@@ -13,6 +13,7 @@ class QrScanScreen extends StatefulWidget {
 
 class _QrScanScreenState extends State<QrScanScreen> {
   bool _isProcessing = false;
+  String? _scannedUuid;
 
   late final MobileScannerController _scannerController;
 
@@ -28,36 +29,44 @@ class _QrScanScreenState extends State<QrScanScreen> {
     super.dispose();
   }
 
-  void _onOfferScanned(BarcodeCapture capture) async {
+  void _onDetect(BarcodeCapture capture) {
     if (_isProcessing || capture.barcodes.isEmpty) return;
-
     final uuid = capture.barcodes.first.rawValue;
-    if (uuid != null) {
+    if (uuid != null && uuid != _scannedUuid) {
       setState(() {
-        _isProcessing = true;
+        _scannedUuid = uuid;
       });
+    }
+  }
 
-      final repo = context.read<TrackingRepository>();
-      final navigator = Navigator.of(context);
-      try {
-        await repo.clientProcessHostOffer(uuid);
+  Future<void> _connectToHost() async {
+    if (_scannedUuid == null || _isProcessing) return;
 
-        await _scannerController.stop();
-        if (!mounted) return;
+    setState(() {
+      _isProcessing = true;
+    });
 
-        navigator.pushReplacement(
-          MaterialPageRoute(builder: (context) => const ClientStatusScreen()),
-        );
-      } catch (e) {
-        if (!mounted) return;
-        setState(() {
-          _isProcessing = false;
-        });
-        debugPrint("Error processing offer: $e");
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
+    final repo = context.read<TrackingRepository>();
+    final navigator = Navigator.of(context);
+    try {
+      await repo.clientProcessHostOffer(_scannedUuid!);
+
+      await _scannerController.stop();
+      if (!mounted) return;
+
+      navigator.pushReplacement(
+        MaterialPageRoute(builder: (context) => const ClientStatusScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isProcessing = false;
+        _scannedUuid = null; // Allow retry
+      });
+      debugPrint("Error processing offer: $e");
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     }
   }
 
@@ -67,10 +76,41 @@ class _QrScanScreenState extends State<QrScanScreen> {
       appBar: AppBar(title: const Text('Scan Host QR')),
       body: Stack(
         children: [
-          MobileScanner(
-            controller: _scannerController,
-            onDetect: _onOfferScanned,
-          ),
+          MobileScanner(controller: _scannerController, onDetect: _onDetect),
+          if (_scannedUuid != null && !_isProcessing)
+            Positioned(
+              bottom: 40,
+              left: 20,
+              right: 20,
+              child: Card(
+                color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Host ID: ${_scannedUuid!.substring(0, 8)}...',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton(
+                        onPressed: _connectToHost,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Connect to Host'),
+                      ),
+                      TextButton(
+                        onPressed: () => setState(() => _scannedUuid = null),
+                        child: const Text('Retry Scan'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           if (_isProcessing)
             Container(
               color: Colors.black54,

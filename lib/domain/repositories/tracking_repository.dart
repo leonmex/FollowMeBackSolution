@@ -31,9 +31,6 @@ abstract class TrackingRepository {
   /// Send the actual LocationUpdate to the host.
   Future<void> sendLocationUpdate(LocationUpdate update);
 
-  /// Helper to send a disconnect signal before closing the connection
-  Future<void> sendDisconnectSignal();
-
   /// Close current connection without disposing streams
   Future<void> disconnect();
 
