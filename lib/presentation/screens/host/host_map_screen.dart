@@ -14,7 +14,8 @@ class HostMapScreen extends StatefulWidget {
   State<HostMapScreen> createState() => _HostMapScreenState();
 }
 
-class _HostMapScreenState extends State<HostMapScreen> {
+class _HostMapScreenState extends State<HostMapScreen>
+    with WidgetsBindingObserver {
   final MapController _mapController = MapController();
   late HostMapViewModel _viewModel;
   bool _isShowingDisconnectDialog = false;
@@ -22,6 +23,7 @@ class _HostMapScreenState extends State<HostMapScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initBackground();
     _viewModel = context.read<HostMapViewModel>();
     _viewModel.addListener(_onViewModelChange);
@@ -100,12 +102,26 @@ class _HostMapScreenState extends State<HostMapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (Platform.isAndroid) {
       FlutterForegroundTask.stopService();
     }
     _viewModel.removeListener(_onViewModelChange);
     _mapController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.detached) {
+      // The app is being destroyed by the user or OS.
+      // On Android, swiping the app away can trigger `detached`, but we want
+      // the Foreground Service to keep the WebRTC Isolate alive.
+      // We only forcefully disconnect on iOS where background execution is stricter.
+      if (Platform.isIOS && mounted) {
+        context.read<TrackingRepository>().disconnect();
+      }
+    }
   }
 
   @override

@@ -40,9 +40,12 @@ class _QrGenerateScreenState extends State<QrGenerateScreen> {
       _waitForClientPairing();
     } catch (e) {
       if (!mounted) return;
+      final msg = e.toString().contains('Internet is requiered')
+          ? e.toString().replaceAll('Exception: ', '')
+          : 'Error generating Offer: $e';
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error generating Offer: $e')));
+      ).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 

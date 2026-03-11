@@ -64,9 +64,12 @@ class _QrScanScreenState extends State<QrScanScreen> {
         _scannedUuid = null; // Allow retry
       });
       debugPrint("Error processing offer: $e");
+      final msg = e.toString().contains('Internet is requiered')
+          ? e.toString().replaceAll('Exception: ', '')
+          : 'Error: $e';
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(msg)));
     }
   }
 

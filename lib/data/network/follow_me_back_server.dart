@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 import '../../core/config/app_config.dart';
@@ -53,6 +55,9 @@ class FollowMeBackServer {
       return response.statusCode == 200 || response.statusCode == 201;
     } catch (e) {
       debugPrint('Error posting reconnection data: $e');
+      if (e is SocketException || e.toString().contains('SocketException') || e is TimeoutException) {
+        rethrow;
+      }
       return false;
     }
   }
@@ -79,6 +84,9 @@ class FollowMeBackServer {
       return null;
     } catch (e) {
       debugPrint('Error polling reconnection data: $e');
+      if (e is SocketException || e.toString().contains('SocketException') || e is TimeoutException) {
+        rethrow;
+      }
       return null;
     }
   }

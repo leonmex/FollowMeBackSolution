@@ -11,7 +11,7 @@ import 'webrtc/webrtc_signaler.dart';
 
 /// Facade for WebRTC operations. Delegates to Host or Client specific sessions.
 class WebRTCManager {
-  final WebRTCSignaler _signaler = const WebRTCSignaler();
+  final WebRTCSignaler _signaler;
   WebRTCHostSession? _hostSession;
   WebRTCClientSession? _clientSession;
   SessionRole? _currentRole;
@@ -20,7 +20,8 @@ class WebRTCManager {
   final _locationUpdatesController =
       StreamController<LocationUpdate>.broadcast();
 
-  WebRTCManager();
+  WebRTCManager({WebRTCSignaler? signaler})
+      : _signaler = signaler ?? const WebRTCSignaler();
 
   // Getters
   bool get isConnected => _activeHandler?.isConnected ?? false;

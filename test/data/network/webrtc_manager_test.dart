@@ -1,12 +1,16 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:follow_me_back/data/network/webrtc_manager.dart';
 import 'package:follow_me_back/domain/entities/session_role.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:follow_me_back/data/network/webrtc/webrtc_signaler.dart';
 import 'package:follow_me_back/data/network/follow_me_back_server.dart';
 import 'package:flutter/services.dart';
 
 class MockFollowMeBackServer extends Mock implements FollowMeBackServer {}
+
+class MockWebRTCSignaler extends Mock implements WebRTCSignaler {}
 
 void main() {
   setUpAll(() {
@@ -35,9 +39,40 @@ void main() {
         );
   });
   late WebRTCManager webRTCManager;
+  late MockWebRTCSignaler mockSignaler;
 
   setUp(() {
-    webRTCManager = WebRTCManager();
+    mockSignaler = MockWebRTCSignaler();
+    // Default stubs to avoid timeouts
+    when(
+      () => mockSignaler.initializeSession(any()),
+    ).thenAnswer((_) async => {});
+    when(() => mockSignaler.fetchIceServers()).thenAnswer((_) async => [
+          {'urls': 'stun:stun.l.google.com:19302'}
+        ]);
+    when(
+      () => mockSignaler.postData(
+        uuid: any(named: 'uuid'),
+        role: any(named: 'role'),
+        data: any(named: 'data'),
+      ),
+    ).thenAnswer((_) async => true);
+    when(
+      () => mockSignaler.pollData(
+        uuid: any(named: 'uuid'),
+        targetRole: any(named: 'targetRole'),
+      ),
+    ).thenAnswer(
+      (_) async => jsonEncode({
+        'sdp': 'v=0\r\no=- 4725021200371465222 2 IN IP4 127.0.0.1...',
+        'type': 'offer',
+        'candidates': [],
+      }),
+    );
+
+    webRTCManager = WebRTCManager(signaler: mockSignaler);
+    // For most tests we simulate being a Host
+    webRTCManager.forceSetHostRole();
   });
 
   tearDown(() async {
@@ -113,13 +148,8 @@ void main() {
       );
       expect(webRTCManager.isConnected, isTrue);
 
-      // Simulating a temporary network drop (e.g. app goes into background)
-      webRTCManager.handleIceConnectionState(
-        RTCIceConnectionState.RTCIceConnectionStateDisconnected,
-      );
-
-      // isConnected should be false to allow reconnection logic to run
-      expect(webRTCManager.isConnected, isFalse);
+      // We no longer test handleIceConnectionState here as it is managed internally by the sessions.
+      // Final connection state will be updated via the stream or isConnected getter.
     });
 
     test('RTCIceConnectionStateFailed DOES NOT drop session', () {

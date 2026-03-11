@@ -50,7 +50,9 @@ class _NfcGenerateScreenState extends State<NfcGenerateScreen> {
       if (!mounted) return;
       setState(() {
         _isGenerating = false;
-        _statusMessage = 'Error generating Offer: $e';
+        _statusMessage = e.toString().contains('Internet is requiered')
+            ? e.toString().replaceAll('Exception: ', '')
+            : 'Error generating Offer: $e';
       });
     }
   }

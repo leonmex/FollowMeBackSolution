@@ -89,7 +89,10 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
       // The app is being destroyed by the user or OS.
-      if (mounted) {
+      // On Android, swiping the app away can trigger `detached`, but we want
+      // the Foreground Service to keep the WebRTC Isolate alive.
+      // We only forcefully disconnect on iOS where background execution is stricter.
+      if (Platform.isIOS && mounted) {
         context.read<TrackingRepository>().disconnect();
       }
     }
@@ -148,6 +151,32 @@ class _ClientStatusScreenState extends State<ClientStatusScreen>
           setState(() {
             _statusMessage = 'Connection lost, waiting to reconnect...';
           });
+        }
+      } else if (state == 'NO_INTERNET') {
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Waiting for Internet Connection...';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Internet connection lost. Waiting for network...'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      } else if (state == 'INTERNET_RESTORED') {
+        if (mounted) {
+          setState(() {
+            _statusMessage = 'Internet restored, reconnecting...';
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Internet restored! Reconnecting...'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 3),
+            ),
+          );
         }
       } else if (state.contains('Connected') && mounted) {
         setState(() {

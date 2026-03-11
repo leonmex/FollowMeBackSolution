@@ -103,7 +103,10 @@ class _NfcScanScreenState extends State<NfcScanScreen> {
                 ),
               );
             } catch (e) {
-              _updateStatus('Failed to process connection: $e', false);
+              final msg = e.toString().contains('Internet is requiered')
+                  ? e.toString().replaceAll('Exception: ', '')
+                  : 'Failed to process connection: $e';
+              _updateStatus(msg, false);
             }
           }
         },

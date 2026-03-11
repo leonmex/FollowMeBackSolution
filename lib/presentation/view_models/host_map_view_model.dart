@@ -95,6 +95,10 @@ class HostMapViewModel extends ChangeNotifier {
         } else {
           _connectionStatus = state;
         }
+      } else if (state == 'NO_INTERNET') {
+        _connectionStatus = 'Waiting for Internet Connection...';
+      } else if (state == 'INTERNET_RESTORED') {
+        _connectionStatus = 'Internet restored, reconnecting...';
       } else if (state.contains('Connected')) {
         _connectionStatus = 'Securely Connected';
       } else {
