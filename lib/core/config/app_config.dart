@@ -1,9 +1,9 @@
 class AppConfig {
   /// FollowMeBack REST API URL for fetching TURN credentials
-  static const String followMeBackRestUrl = '<URL_TO_YOUR_SERVER>';
+  static const String followMeBackRestUrl = '<URL_TO_YOUR_TURN_SERVER>';
 
   /// FollowMeBack API Key
-  static const String followMeBackApiKey = '<YOUR_API_KEY>';
+  static const String followMeBackApiKey = 'API_TOKEN';
 
   /// WebRTC DataChannel Keep-alive ping interval
   static const int keepAlivePingIntervalSeconds = 20;
@@ -12,7 +12,7 @@ class AppConfig {
   static const int maxClientLocationsToSave = 20;
 
   /// Cloud function for exchanging SDPs during ICE Restarts
-  static const String restablishCommunicationUrl = '<YOUR_CLOUD_FUNCTION_URL>';
+  static const String restablishCommunicationUrl = '<URL_TO_YOUR_ICE_SERVER>';
 
   /// Timeout for HTTP signaling requests
   static const int signalingTimeoutSeconds = 10;
@@ -22,6 +22,9 @@ class AppConfig {
 
   /// Interval for polling signaling server
   static const int signalingPollIntervalSeconds = 5;
+
+  /// Minimum interval between any two signaling requests to prevent DDoS
+  static const int signalingMinimumIntervalSeconds = 1;
 
   /// Number of failed reconnection attempts before a hard reset
   static const int reconnectionHardResetLimit = 6;
