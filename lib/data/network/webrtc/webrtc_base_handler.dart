@@ -131,7 +131,7 @@ abstract class WebRTCBaseHandler {
       _handleConnectionState(state);
 
   void _handleConnectionState(RTCPeerConnectionState state) {
-    debugPrint('WebRTC: PC Connection State Changed: ${state.name}');
+    final wasConnected = _isConnected;
     if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
       _isConnected = true;
     } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
@@ -139,6 +139,9 @@ abstract class WebRTCBaseHandler {
         state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
       _isConnected = false;
     }
+    debugPrint(
+      'WebRTC: PC state → ${state.name} | isConnected: $wasConnected → $_isConnected',
+    );
     emitConnectionState(state.name);
     onConnectionStateChanged(state);
   }
@@ -148,10 +151,7 @@ abstract class WebRTCBaseHandler {
       _handleIceConnectionState(state);
 
   void _handleIceConnectionState(RTCIceConnectionState state) {
-    debugPrint('WebRTC: ICE Connection State Changed: ${state.name}');
-    // Set isConnected true on ICE connected/completed — this fires before
-    // RTCPeerConnectionStateConnected, ensuring the reconnection poll stops
-    // as soon as ICE finds a working path rather than one tick later.
+    final wasConnected = _isConnected;
     if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
         state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
       _isConnected = true;
@@ -160,6 +160,9 @@ abstract class WebRTCBaseHandler {
         state == RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
       _isConnected = false;
     }
+    debugPrint(
+      'WebRTC: ICE state → ${state.name} | isConnected: $wasConnected → $_isConnected',
+    );
     emitConnectionState(state.name);
     onIceConnectionStateChanged(state);
   }

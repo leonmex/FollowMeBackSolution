@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:provider/provider.dart';
@@ -39,7 +40,7 @@ class _HostMapScreenState extends State<HostMapScreen>
           builder: (ctx) => AlertDialog(
             title: const Text('Client Disconnected'),
             content: const Text(
-              'The Follower has closed their app or lost connection.',
+              'The Client has disconnected from the session.',
             ),
             actions: [
               TextButton(
@@ -124,6 +125,68 @@ class _HostMapScreenState extends State<HostMapScreen>
     }
   }
 
+  Widget _buildConnectionIcon(PeerConnectionIcon state) {
+    const double iconSize = 26;
+    const double containerSize = 36;
+
+    switch (state) {
+      case PeerConnectionIcon.connected:
+        return Container(
+          key: const ValueKey('connected'),
+          width: containerSize,
+          height: containerSize,
+          decoration: BoxDecoration(
+            color: Colors.green.withValues(alpha: 0.2),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.green, width: 1.5),
+          ),
+          child: const Icon(
+            CupertinoIcons.arrow_right_arrow_left_circle_fill,
+            color: Colors.green,
+            size: iconSize,
+          ),
+        );
+      case PeerConnectionIcon.sessionAlive:
+        return Container(
+          key: const ValueKey('sessionAlive'),
+          width: containerSize,
+          height: containerSize,
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.2),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.orange, width: 1.5),
+          ),
+          child: const Icon(
+            CupertinoIcons.arrow_right_arrow_left_circle,
+            color: Colors.orange,
+            size: iconSize,
+          ),
+        );
+      case PeerConnectionIcon.clientDisconnected:
+        return Container(
+          key: const ValueKey('clientDisconnected'),
+          width: containerSize,
+          height: containerSize,
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.2),
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.red, width: 1.5),
+          ),
+          child: const Icon(
+            CupertinoIcons.arrow_right_circle,
+            color: Colors.red,
+            size: iconSize,
+          ),
+        );
+      case PeerConnectionIcon.reconnecting:
+        return _SpinningIcon(
+          key: const ValueKey('reconnecting'),
+          size: containerSize,
+          iconSize: iconSize,
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<HostMapViewModel>(
@@ -136,42 +199,61 @@ class _HostMapScreenState extends State<HostMapScreen>
           appBar: AppBar(
             title: const Text('Following Map (Host)'),
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(20.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    viewModel.connectionStatus,
-                    style: const TextStyle(fontSize: 12, color: Colors.white70),
-                  ),
-                  if (viewModel.clientBatteryLevel != null) ...[
-                    const SizedBox(width: 8),
-                    Icon(
-                      viewModel.clientBatteryLevel! > 20
-                          ? Icons.battery_full
-                          : Icons.battery_alert,
-                      size: 14,
-                      color: viewModel.clientBatteryLevel! > 50
-                          ? Colors.green
-                          : viewModel.clientBatteryLevel! > 20
-                          ? Colors.orange
-                          : Colors.red,
+              preferredSize: const Size.fromHeight(52.0),
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 400),
+                      transitionBuilder: (child, animation) => ScaleTransition(
+                        scale: animation,
+                        child: FadeTransition(opacity: animation, child: child),
+                      ),
+                      child: _buildConnectionIcon(
+                        viewModel.connectionIconState,
+                      ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 8),
                     Text(
-                      '${viewModel.clientBatteryLevel}%',
-                      style: TextStyle(
+                      viewModel.connectionStatus == 'PEER_DISCONNECTED'
+                          ? 'Client disconnected'
+                          : viewModel.connectionStatus,
+                      style: const TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    if (viewModel.clientBatteryLevel != null) ...[
+                      const SizedBox(width: 8),
+                      Icon(
+                        viewModel.clientBatteryLevel! > 20
+                            ? Icons.battery_full
+                            : Icons.battery_alert,
+                        size: 14,
                         color: viewModel.clientBatteryLevel! > 50
                             ? Colors.green
                             : viewModel.clientBatteryLevel! > 20
                             ? Colors.orange
                             : Colors.red,
                       ),
-                    ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${viewModel.clientBatteryLevel}%',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: viewModel.clientBatteryLevel! > 50
+                              ? Colors.green
+                              : viewModel.clientBatteryLevel! > 20
+                              ? Colors.orange
+                              : Colors.red,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),
@@ -275,6 +357,56 @@ class _HostMapScreenState extends State<HostMapScreen>
           ),
         );
       },
+    );
+  }
+}
+
+class _SpinningIcon extends StatefulWidget {
+  final double size;
+  final double iconSize;
+
+  const _SpinningIcon({super.key, required this.size, required this.iconSize});
+
+  @override
+  State<_SpinningIcon> createState() => _SpinningIconState();
+}
+
+class _SpinningIconState extends State<_SpinningIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _controller,
+      child: Container(
+        width: widget.size,
+        height: widget.size,
+        decoration: const BoxDecoration(
+          color: Colors.red,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          CupertinoIcons.arrow_2_circlepath_circle,
+          color: Colors.white,
+          size: widget.iconSize,
+        ),
+      ),
     );
   }
 }

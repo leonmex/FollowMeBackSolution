@@ -57,6 +57,10 @@ class WebRTCClientSession extends WebRTCBaseHandler {
     switch (state) {
       case RTCIceConnectionState.RTCIceConnectionStateFailed:
       case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
+        // Reset attempt count so the very next tick is a hard reset.
+        // Without this, the loop keeps skipping the stale cached offer and
+        // waits reconnectionHardResetLimit ticks before fetching a fresh one.
+        _reconnectAttemptCount = 0;
         _startReconnectionPoll();
         break;
 
@@ -245,19 +249,21 @@ class WebRTCClientSession extends WebRTCBaseHandler {
       _reconnectAttemptCount++;
       debugPrint('Client: Reconnection poll tick #$_reconnectAttemptCount');
 
-      // FIX 3: Trigger Hard Reset IMMEDIATELY on the first tick.
-      // This ensures we fetch fresh ICE/TURN credentials as soon as the
-      // connection drops instead of trying to salvage the dead session.
       final bool needsHardReset = _reconnectAttemptCount == 1 ||
-          _reconnectAttemptCount % AppConfig.reconnectionHardResetLimit == 0;
+          _reconnectAttemptCount % AppConfig.reconnectionHardResetLimit == 0 ||
+          peerConnection == null;
+
+      // Track whether we already recreated the PC this tick so we don't
+      // do it a second time when applying a new offer (double recreation
+      // wasted credentials, added latency, and fired spurious ICE callbacks).
+      bool didRecreatePC = false;
 
       if (needsHardReset) {
         debugPrint('Client: Hard resetting WebRTC stack...');
         await forceRecreatePC();
-        // Plan: Add centralized delay after hard reset
+        didRecreatePC = true;
         await Future.delayed(
             Duration(seconds: AppConfig.signalingMinimumIntervalSeconds));
-        // Fall through — don't return. Let the offer fetch below run immediately.
       }
 
       final hostData = await signaler.pollData(
@@ -277,14 +283,14 @@ class WebRTCClientSession extends WebRTCBaseHandler {
         debugPrint('Client RECOVERED Host Data Preview: ${hostData.length > 100 ? '${hostData.substring(0, 100)}...' : hostData}');
         debugPrint('===============================================');
 
-        // FIX 1 Revised: We MUST wait for a NEW Offer from the Host.
-        // If we generate a new Answer for an old Offer, the Host cannot accept
-        // it because it is already in a `stable` state, or it will cause an
-        // m-lines mismatch if the Host just hard-reset.
-        await forceRecreatePC();
-        // Plan: Add delay before applying offer to allow server state to settle
-        await Future.delayed(
-            Duration(seconds: AppConfig.signalingMinimumIntervalSeconds));
+        // Only recreate the PC if we haven't already done so on this tick.
+        // When needsHardReset was true, the PC is already fresh with new
+        // ICE/TURN credentials — recreating it again wastes the session.
+        if (!didRecreatePC) {
+          await forceRecreatePC();
+          await Future.delayed(
+              Duration(seconds: AppConfig.signalingMinimumIntervalSeconds));
+        }
         await _applyOfferAndPostAnswer(hostData);
       } else {
         debugPrint('Client: No new Host Offer yet. Will retry...');

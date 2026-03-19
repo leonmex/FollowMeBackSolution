@@ -55,6 +55,12 @@ class WebRTCHostSession extends WebRTCBaseHandler {
     switch (state) {
       case RTCIceConnectionState.RTCIceConnectionStateFailed:
       case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
+        debugPrint(
+          'Host: ICE ${state.name} — resetting _reconnectAttemptCount '
+          '(was $_reconnectAttemptCount) to 0 so next tick is a hard reset. '
+          '_isReconnecting=$_isReconnecting',
+        );
+        _reconnectAttemptCount = 0;
         _startReconnectionLoop();
         break;
 
@@ -183,25 +189,27 @@ class WebRTCHostSession extends WebRTCBaseHandler {
 
   Future<void> _acceptAnswer(String data) async {
     _lastAcceptedAnswer = data;
-    
+
     debugPrint('=== HOST RECONNECTION TRACE: ACCEPT ANSWER ===');
     debugPrint('Host RECEIVED Data Length: ${data.length}');
     debugPrint('Host RECEIVED Data Preview: ${data.length > 100 ? '${data.substring(0, 100)}...' : data}');
-    
-    // FIX 4: Guard against setRemoteDescription in wrong signaling state.
-    // This was the direct cause of "Called in wrong state: stable".
-    // After ICE succeeds the PC moves to stable — calling setRemoteDescription
-    // again crashes. Now we check before every call.
+
     final signalingState = peerConnection?.signalingState;
+    debugPrint(
+      'Host: _acceptAnswer — peerConnection=${peerConnection != null ? "exists" : "NULL"} '
+      'signalingState=$signalingState isConnected=$isConnected',
+    );
+
     if (signalingState == null ||
         signalingState == RTCSignalingState.RTCSignalingStateStable ||
         signalingState == RTCSignalingState.RTCSignalingStateClosed) {
       debugPrint(
-        'Host: Skipping setRemoteDescription — '
-        'PC already in state: $signalingState',
+        'Host: [BLOCKED] _acceptAnswer skipped — wrong signalingState: $signalingState. '
+        'Answer will NOT be applied. This is the reconnection deadlock.',
       );
       return;
     }
+    debugPrint('Host: signalingState OK ($signalingState) — proceeding with setRemoteDescription.');
 
     final map = jsonDecode(data);
     final description = RTCSessionDescription(map['sdp'], map['type']);
@@ -260,9 +268,14 @@ class WebRTCHostSession extends WebRTCBaseHandler {
       // per user request, so that ICE, TURN, and SDP are always recreated as 
       // soon as the connection drops, rather than trying to salvage the dead PC.
       // It will also repeat every N attempts if it remains disconnected.
+      // Also hard-reset when peerConnection is null — this means the previous
+      // hard reset failed mid-way (e.g. ICE server fetch threw during network
+      // transition) and we must retry rather than skip straight to pollData
+      // where the null-PC guard would block _acceptAnswer indefinitely.
       final bool needsHardReset =
           _reconnectAttemptCount == 1 ||
-          _reconnectAttemptCount % AppConfig.reconnectionHardResetLimit == 0;
+          _reconnectAttemptCount % AppConfig.reconnectionHardResetLimit == 0 ||
+          peerConnection == null;
 
       if (needsHardReset) {
         debugPrint(
@@ -278,10 +291,17 @@ class WebRTCHostSession extends WebRTCBaseHandler {
         );
         setDataChannel(channel);
 
-        // Post fresh offer with iceRestart so client knows to re-answer
-        final offer = await peerConnection!.createOffer({'iceRestart': true});
+        // forceRecreatePC() already created a brand-new PC with fresh ICE
+        // credentials — passing iceRestart:true on a new PC has no existing
+        // session to restart and can produce a mismatched SDP on some platforms.
+        final offer = await peerConnection!.createOffer();
         await peerConnection!.setLocalDescription(offer);
         await waitForIceGathering();
+        debugPrint(
+          'Host: ICE gathering done. '
+          '${localIceCandidates.length} candidates gathered '
+          '(relay count: ${localIceCandidates.where((c) => (c['candidate'] as String? ?? '').contains('relay')).length}).',
+        );
         await _postCurrentOffer();
         // Plan: Add centralized delay after posting offer during hard reset
         await Future.delayed(
@@ -295,9 +315,18 @@ class WebRTCHostSession extends WebRTCBaseHandler {
         peerId: 'host',
       );
 
+      debugPrint(
+        'Host: Poll result — clientData=${clientData != null ? "${clientData.length} bytes" : "null"} '
+        'isConnected=$isConnected signalingState=${peerConnection?.signalingState}',
+      );
+
       if (clientData != null && clientData.isNotEmpty) {
         if (clientData == _lastAcceptedAnswer) {
-          debugPrint('Host: Ignoring stale Answer already applied.');
+          debugPrint(
+            'Host: [SKIP] clientData matches _lastAcceptedAnswer — '
+            'not re-applying same answer. signalingState=${peerConnection?.signalingState} '
+            'isConnected=$isConnected',
+          );
           return;
         }
 

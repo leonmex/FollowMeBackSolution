@@ -9,6 +9,8 @@ import '../../../core/config/app_config.dart';
 
 enum UpdateStatus { initial, requesting, success, error }
 
+enum PeerConnectionIcon { connected, sessionAlive, clientDisconnected, reconnecting }
+
 class HostMapViewModel extends ChangeNotifier {
   final TrackingRepository repository;
 
@@ -16,7 +18,10 @@ class HostMapViewModel extends ChangeNotifier {
   final List<LatLng> _locations = [];
   int? _clientBatteryLevel;
 
-  String _connectionStatus = 'Waiting for connection...';
+  // HostMapScreen only opens after a successful pairing, so the connection
+  // is already established at construction time.
+  String _connectionStatus = 'Securely Connected';
+  PeerConnectionIcon _connectionIcon = PeerConnectionIcon.connected;
   LatLng? _hostLocation;
 
   UpdateStatus _updateStatus = UpdateStatus.initial;
@@ -32,6 +37,39 @@ class HostMapViewModel extends ChangeNotifier {
   String get connectionStatus => _connectionStatus;
   LatLng? get hostLocation => _hostLocation;
   UpdateStatus get updateStatus => _updateStatus;
+  PeerConnectionIcon get connectionIconState => _connectionIcon;
+
+  /// Evaluates the current connection status string and updates [_connectionIcon].
+  /// Pass [dataFlowing] = true when a location update is received so that an
+  /// outdated [clientDisconnected] state is corrected automatically.
+  void _resolveConnectionIcon({bool dataFlowing = false}) {
+    final prevIcon = _connectionIcon;
+
+    if (dataFlowing && _connectionIcon == PeerConnectionIcon.clientDisconnected) {
+      _connectionIcon = PeerConnectionIcon.connected;
+      _connectionStatus = 'Securely Connected';
+      debugPrint(
+        'ViewModel: _resolveConnectionIcon dataFlowing=true override '
+        '→ icon: $prevIcon → $_connectionIcon',
+      );
+      return;
+    }
+
+    if (_connectionStatus == 'Securely Connected') {
+      _connectionIcon = PeerConnectionIcon.connected;
+    } else if (_connectionStatus == 'Waiting for Internet Connection...') {
+      _connectionIcon = PeerConnectionIcon.sessionAlive;
+    } else if (_connectionStatus == 'PEER_DISCONNECTED') {
+      _connectionIcon = PeerConnectionIcon.clientDisconnected;
+    } else {
+      _connectionIcon = PeerConnectionIcon.reconnecting;
+    }
+
+    debugPrint(
+      'ViewModel: _resolveConnectionIcon status="$_connectionStatus" '
+      'dataFlowing=$dataFlowing → icon: $prevIcon → $_connectionIcon',
+    );
+  }
 
   Future<void> _fetchHostLocation() async {
     try {
@@ -87,6 +125,7 @@ class HostMapViewModel extends ChangeNotifier {
 
   void _listenToUpdates() {
     repository.connectionState.listen((state) {
+      debugPrint('ViewModel: raw connectionState received → "$state"');
       if (state.contains('Disconnected') ||
           state.contains('Failed') ||
           state.contains('Closed')) {
@@ -99,11 +138,14 @@ class HostMapViewModel extends ChangeNotifier {
         _connectionStatus = 'Waiting for Internet Connection...';
       } else if (state == 'INTERNET_RESTORED') {
         _connectionStatus = 'Internet restored, reconnecting...';
-      } else if (state.contains('Connected')) {
+      } else if (state.contains('Connected') || state.contains('Completed')) {
+        // RTCIceConnectionStateCompleted also means fully connected
+        // but does not contain the word "Connected".
         _connectionStatus = 'Securely Connected';
       } else {
         _connectionStatus = state;
       }
+      _resolveConnectionIcon();
       notifyListeners();
     });
 
@@ -124,6 +166,7 @@ class HostMapViewModel extends ChangeNotifier {
       _updateStatus = UpdateStatus.success;
       _updateTimer?.cancel();
     }
+    _resolveConnectionIcon(dataFlowing: true);
     notifyListeners();
   }
 

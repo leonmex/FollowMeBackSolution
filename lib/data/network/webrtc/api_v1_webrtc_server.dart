@@ -62,14 +62,17 @@ class ApiV1WebRTCServer {
 
       if (response.statusCode == 200) {
         final List<dynamic> array = jsonDecode(response.body);
+        if (array.isEmpty) {
+          throw Exception('ApiV1 refreshIceServers returned empty list');
+        }
         return {'ice_servers': array};
       } else {
         debugPrint('ApiV1 Refresh ICE error response: ${response.statusCode} - ${response.body}');
-        return {};
+        throw Exception('ApiV1 refreshIceServers HTTP ${response.statusCode}');
       }
     } catch (e) {
       debugPrint('Error refreshing API v1 Credentials: $e');
-      return {};
+      rethrow;
     }
   }
 

@@ -74,8 +74,15 @@ class ApiV1WebRTCSignaler extends WebRTCSignaler {
   @override
   Future<TurnResponse> refreshIceServers({required String peerUuid}) async {
     await throttle();
-    final data = await ApiV1WebRTCServer.refreshIceServers(peerUuid: peerUuid);
-    return _parseTurnResponse(data, null);
+    try {
+      final data = await ApiV1WebRTCServer.refreshIceServers(peerUuid: peerUuid);
+      return _parseTurnResponse(data, null);
+    } catch (e) {
+      // Refresh endpoint failed (network transition: WiFi→5G gap, server error).
+      // Fall back to a full fresh credential fetch so we always get TURN relay.
+      debugPrint('ApiV1: refreshIceServers failed ($e) — falling back to fetchIceServers.');
+      return fetchIceServers();
+    }
   }
 
   TurnResponse _parseTurnResponse(Map<String, dynamic> data, String? fallbackSessionId) {
