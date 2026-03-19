@@ -84,13 +84,18 @@ class WebRTCClientSession extends WebRTCBaseHandler {
     setSessionInfo(hostUuid, SessionRole.client);
     
     // Register the session on the server (Moved from Host)
-    await signaler.initializeSession(hostUuid);
+    await signaler.initializeSession(
+      uuid: hostUuid,
+      peerId: 'client',
+      role: 'answerer',
+    );
     debugPrint('Client: Initialized session mailbox for UUID: $hostUuid');
 
     // Post "READY" to tell Host to push its Offer
     await signaler.postData(
       uuid: hostUuid,
       role: 'Client',
+      peerId: 'client',
       data: jsonEncode({'type': 'READY'}),
     );
     debugPrint('Client: Pinged Host with READY state.');
@@ -121,6 +126,7 @@ class WebRTCClientSession extends WebRTCBaseHandler {
       final data = await signaler.pollData(
         uuid: sessionUuid!,
         targetRole: 'Host',
+        peerId: 'client',
       );
       if (data != null && data.isNotEmpty) {
         final map = jsonDecode(data);
@@ -185,14 +191,19 @@ class WebRTCClientSession extends WebRTCBaseHandler {
     debugPrint('Client POST Full Payload Preview: ${payload.length > 100 ? '${payload.substring(0, 100)}...' : payload}');
     debugPrint('==============================================');
 
-    await signaler.postData(uuid: sessionUuid!, role: 'Client', data: payload);
+    await signaler.postData(
+      uuid: sessionUuid!,
+      role: 'Client',
+      peerId: 'client',
+      data: payload,
+    );
     debugPrint('Client: Answer successfully posted to FollowMeBackServer. Waiting for connection...');
   }
 
   Future<void> _checkConnectivity(String role) async {
     try {
-      final servers = await signaler.fetchIceServers();
-      if (servers.isEmpty) throw Exception('No ICE servers returned');
+      final response = await signaler.fetchIceServers(sessionId: sessionUuid);
+      if (response.iceServers.isEmpty) throw Exception('No ICE servers returned');
     } catch (e) {
       debugPrint('$role: Internet connectivity check failed: $e');
       throw Exception('Internet is requiered for FollowMeBack $role');
@@ -252,6 +263,7 @@ class WebRTCClientSession extends WebRTCBaseHandler {
       final hostData = await signaler.pollData(
         uuid: sessionUuid!,
         targetRole: 'Host',
+        peerId: 'client',
       );
 
       if (hostData != null && hostData.isNotEmpty) {

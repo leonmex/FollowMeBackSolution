@@ -22,6 +22,7 @@ abstract class WebRTCBaseHandler {
   bool _isConnected = false;
   SessionRole? _currentRole;
   String? _sessionUuid;
+  String? _peerUuid;
   bool _isDisconnecting = false;
   bool get isDisconnecting => _isDisconnecting;
   bool _isInitializing = false;
@@ -35,6 +36,7 @@ abstract class WebRTCBaseHandler {
   bool get isConnected => _isConnected;
   SessionRole? get currentRole => _currentRole;
   String? get sessionUuid => _sessionUuid;
+  String? get peerUuid => _peerUuid; // Added peerUuid getter
 
   // Return a copy so callers can't mutate the internal list mid-gathering.
   List<Map<String, dynamic>> get localIceCandidates =>
@@ -68,10 +70,25 @@ abstract class WebRTCBaseHandler {
       // time-limited (~1hr). Stale credentials silently produce zero
       // TURN candidates, leaving ICE stuck at CONNECTING forever.
       debugPrint('WebRTC: Fetching fresh ICE/TURN credentials...');
-      final iceServers = await signaler.fetchIceServers();
+      TurnResponse response;
+      if (_peerUuid == null) {
+        response = await signaler.fetchIceServers(sessionId: _sessionUuid);
+        if (response.peerUuid.isNotEmpty) {
+          _peerUuid = response.peerUuid;
+        }
+      } else {
+        debugPrint('WebRTC: Reconnecting with existing peer UUID...');
+        response = await signaler.refreshIceServers(peerUuid: _peerUuid!);
+      }
+
+      if (_sessionUuid == null && response.sessionId.isNotEmpty) {
+        _sessionUuid = response.sessionId;
+      }
+      
+      debugPrint('WebRTC: Configuring PC with ICE Servers: ${jsonEncode(response.iceServers)}');
 
       final configuration = {
-        'iceServers': iceServers,
+        'iceServers': response.iceServers,
         'iceTransportPolicy': 'all',
         'iceCandidatePoolSize': AppConfig.iceCandidatePoolSize,
         'bundlePolicy': 'max-bundle',
@@ -85,12 +102,17 @@ abstract class WebRTCBaseHandler {
 
       _peerConnection!.onIceCandidate = (RTCIceCandidate? candidate) {
         if (candidate != null && candidate.candidate != null) {
+          debugPrint('WebRTC: Gathered local ICE candidate: ${candidate.candidate}');
           _localIceCandidates.add({
             'candidate': candidate.candidate,
             'sdpMid': candidate.sdpMid,
             'sdpMLineIndex': candidate.sdpMLineIndex,
           });
         }
+      };
+
+      _peerConnection!.onIceGatheringState = (RTCIceGatheringState state) {
+        debugPrint('WebRTC: ICE Gathering State Changed: ${state.name}');
       };
 
       _peerConnection!.onDataChannel = (RTCDataChannel channel) {
@@ -109,6 +131,7 @@ abstract class WebRTCBaseHandler {
       _handleConnectionState(state);
 
   void _handleConnectionState(RTCPeerConnectionState state) {
+    debugPrint('WebRTC: PC Connection State Changed: ${state.name}');
     if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
       _isConnected = true;
     } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
@@ -125,6 +148,7 @@ abstract class WebRTCBaseHandler {
       _handleIceConnectionState(state);
 
   void _handleIceConnectionState(RTCIceConnectionState state) {
+    debugPrint('WebRTC: ICE Connection State Changed: ${state.name}');
     // Set isConnected true on ICE connected/completed — this fires before
     // RTCPeerConnectionStateConnected, ensuring the reconnection poll stops
     // as soon as ICE finds a working path rather than one tick later.

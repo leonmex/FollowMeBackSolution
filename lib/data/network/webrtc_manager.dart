@@ -1,13 +1,15 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:uuid/uuid.dart';
 import '../../domain/entities/location_update.dart';
 import '../../domain/entities/session_role.dart';
 import 'webrtc/host_session.dart';
 import 'webrtc/client_session.dart';
 import 'webrtc/webrtc_base_handler.dart';
 import 'webrtc/webrtc_signaler.dart';
+import 'webrtc/legacy_webrtc_signaler.dart';
+import 'webrtc/api_v1_webrtc_signaler.dart';
+import '../../core/config/app_config.dart';
 
 /// Facade for WebRTC operations. Delegates to Host or Client specific sessions.
 class WebRTCManager {
@@ -21,7 +23,10 @@ class WebRTCManager {
       StreamController<LocationUpdate>.broadcast();
 
   WebRTCManager({WebRTCSignaler? signaler})
-      : _signaler = signaler ?? const WebRTCSignaler();
+      : _signaler = signaler ??
+            (AppConfig.useApiV1Webrtc
+                ? const ApiV1WebRTCSignaler()
+                : const LegacyWebRTCSignaler());
 
   // Getters
   bool get isConnected => _activeHandler?.isConnected ?? false;
@@ -50,8 +55,7 @@ class WebRTCManager {
     _hostSession ??= WebRTCHostSession(_signaler);
     _setupListeners(_hostSession!);
 
-    final uuid = const Uuid().v4();
-    return await _hostSession!.createHostOffer(uuid);
+    return await _hostSession!.createHostOffer(null);
   }
 
   /// CLIENT: Process Host UUID and establish connection.

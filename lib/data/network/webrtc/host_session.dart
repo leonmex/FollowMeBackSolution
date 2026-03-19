@@ -77,10 +77,18 @@ class WebRTCHostSession extends WebRTCBaseHandler {
   // ── Initial connection ───────────────────────────────────────────────────────
 
   /// HOST: Create initial Offer and post to Firebase.
-  Future<String> createHostOffer(String uuid) async {
+  Future<String> createHostOffer(String? initialUuid) async {
     await _checkConnectivity('Host');
-    setSessionInfo(uuid, SessionRole.host);
+    if (initialUuid != null) {
+      setSessionInfo(initialUuid, SessionRole.host);
+    }
     await initWebRTC();
+    if (sessionUuid == null) {
+      throw Exception('Failed to generate session UUID from backend');
+    }
+    if (initialUuid == null) {
+      setSessionInfo(sessionUuid!, SessionRole.host);
+    }
 
     final dcInit = RTCDataChannelInit()..ordered = true;
     final channel = await peerConnection!.createDataChannel(
@@ -93,14 +101,14 @@ class WebRTCHostSession extends WebRTCBaseHandler {
     await peerConnection!.setLocalDescription(offer);
     await waitForIceGathering();
     
-    debugPrint('Host: Offer generated and stored locally for UUID: $uuid');
-    return uuid;
+    debugPrint('Host: Offer generated and stored locally for UUID: $sessionUuid');
+    return sessionUuid!;
   }
 
   Future<void> _checkConnectivity(String role) async {
     try {
-      final servers = await signaler.fetchIceServers();
-      if (servers.isEmpty) throw Exception('No ICE servers returned');
+      final response = await signaler.fetchIceServers(sessionId: sessionUuid);
+      if (response.iceServers.isEmpty) throw Exception('No ICE servers returned');
     } catch (e) {
       debugPrint('$role: Internet connectivity check failed: $e');
       throw Exception('Internet is requiered for FollowMeBack $role');
@@ -109,8 +117,8 @@ class WebRTCHostSession extends WebRTCBaseHandler {
 
   Future<void> waitForInitialAnswer({Duration? timeout}) async {
     final startTime = DateTime.now();
-    final effectiveTimeout =
-        timeout ?? Duration(seconds: AppConfig.iceGatheringTimeoutSeconds * 4);
+    // Allow at least 60 seconds for the user to scan the QR code and pair
+    final effectiveTimeout = timeout ?? const Duration(seconds: 60);
 
     bool hasPushedOffer = false;
 
@@ -120,6 +128,7 @@ class WebRTCHostSession extends WebRTCBaseHandler {
       final data = await signaler.pollData(
         uuid: sessionUuid!,
         targetRole: 'Client',
+        peerId: 'host',
       );
       if (data != null && data.isNotEmpty) {
         final map = jsonDecode(data);
@@ -162,6 +171,7 @@ class WebRTCHostSession extends WebRTCBaseHandler {
     final success = await signaler.postData(
       uuid: sessionUuid!,
       role: 'Host',
+      peerId: 'host',
       data: payload,
     );
     if (!success) {
@@ -282,6 +292,7 @@ class WebRTCHostSession extends WebRTCBaseHandler {
       final clientData = await signaler.pollData(
         uuid: sessionUuid!,
         targetRole: 'Client',
+        peerId: 'host',
       );
 
       if (clientData != null && clientData.isNotEmpty) {

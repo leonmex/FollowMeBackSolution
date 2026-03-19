@@ -45,15 +45,22 @@ void main() {
     mockSignaler = MockWebRTCSignaler();
     // Default stubs to avoid timeouts
     when(
-      () => mockSignaler.initializeSession(any()),
+      () => mockSignaler.initializeSession(
+        uuid: any(named: 'uuid'),
+        peerId: any(named: 'peerId'),
+        role: any(named: 'role'),
+      ),
     ).thenAnswer((_) async => {});
-    when(() => mockSignaler.fetchIceServers()).thenAnswer((_) async => [
-          {'urls': 'stun:stun.l.google.com:19302'}
-        ]);
+    when(() => mockSignaler.fetchIceServers(sessionId: any(named: 'sessionId'))).thenAnswer((_) async => TurnResponse(
+          sessionId: 'test-uuid-123',
+          peerUuid: 'test-peer-uuid',
+          iceServers: [{'urls': 'stun:stun.l.google.com:19302'}],
+        ));
     when(
       () => mockSignaler.postData(
         uuid: any(named: 'uuid'),
         role: any(named: 'role'),
+        peerId: any(named: 'peerId'),
         data: any(named: 'data'),
       ),
     ).thenAnswer((_) async => true);
@@ -61,6 +68,7 @@ void main() {
       () => mockSignaler.pollData(
         uuid: any(named: 'uuid'),
         targetRole: any(named: 'targetRole'),
+        peerId: any(named: 'peerId'),
       ),
     ).thenAnswer(
       (_) async => jsonEncode({
