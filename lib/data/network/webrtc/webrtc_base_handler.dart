@@ -188,7 +188,6 @@ abstract class WebRTCBaseHandler {
     }
 
     final completer = Completer<void>();
-    // Preserve any existing listener so we don't silently discard it.
     final originalListener = _peerConnection!.onIceGatheringState;
 
     _peerConnection!.onIceGatheringState = (state) {
@@ -197,6 +196,31 @@ abstract class WebRTCBaseHandler {
         if (!completer.isCompleted) completer.complete();
       }
     };
+
+    // Android never fires RTCIceGatheringStateComplete, so we also poll for a
+    // relay candidate. As soon as one arrives we have a TURN path and can
+    // proceed — no need to wait for the full timeout.
+    final relayPollTimer = Timer.periodic(
+      const Duration(milliseconds: 300),
+      (t) {
+        if (completer.isCompleted) {
+          t.cancel();
+          return;
+        }
+        final hasRelay = _localIceCandidates.any(
+          (c) => (c['candidate'] as String? ?? '').contains('relay'),
+        );
+        if (hasRelay) {
+          debugPrint(
+            'WebRTC: Relay candidate found after '
+            '${_localIceCandidates.length} candidates — '
+            'proceeding without Complete event.',
+          );
+          t.cancel();
+          if (!completer.isCompleted) completer.complete();
+        }
+      },
+    );
 
     await completer.future.timeout(
       Duration(seconds: AppConfig.iceGatheringTimeoutSeconds),
@@ -207,6 +231,7 @@ abstract class WebRTCBaseHandler {
       ),
     );
 
+    relayPollTimer.cancel();
     _peerConnection?.onIceGatheringState = originalListener;
   }
 

@@ -1,9 +1,25 @@
 class AppConfig {
   /// FollowMeBack REST API URL for fetching TURN credentials
-  static const String followMeBackRestUrl = '<URL_TO_YOUR_TURN_SERVER>';
+  static const String followMeBackRestUrl = '<followMeBackRestUrl>';
 
   /// FollowMeBack API Key
-  static const String followMeBackApiKey = 'API_TOKEN';
+  static const String followMeBackApiKey = '<followMeBackApiKey>';
+
+  /// IMPORTANT: Set to true to use the new API v1 WebRTC Signaling and TURN service
+  static const bool useApiV1Webrtc = true;
+
+  /// Base URL for the new WebRTC API v1 endpoints
+  static const String apiV1BaseUrl = '<NEW_TURN_FOLLOW_ME_BACK_SERVER>';
+
+  /// API Key for the new WebRTC API v1
+  static const String apiV1ApiKey = '<API_KEY_FOLLOW_ME_BACK_SERVER>';
+
+  /// Public hostname/IP of the Coturn TURN server.
+  /// The Go backend config.json still has the placeholder "yourdomain.com";
+  /// this value substitutes it on the Flutter side until the backend is updated.
+  /// Set to null once the backend config is corrected.
+  static const String? turnPublicHostname =
+      '<NEW_FOLLOW_ME_BACK_SERVER_HOSTNAME>';
 
   /// WebRTC DataChannel Keep-alive ping interval
   static const int keepAlivePingIntervalSeconds = 20;
@@ -12,13 +28,16 @@ class AppConfig {
   static const int maxClientLocationsToSave = 20;
 
   /// Cloud function for exchanging SDPs during ICE Restarts
-  static const String restablishCommunicationUrl = '<URL_TO_YOUR_ICE_SERVER>';
+  static const String restablishCommunicationUrl =
+      '<restablishCommunicationUrl>';
 
   /// Timeout for HTTP signaling requests
   static const int signalingTimeoutSeconds = 10;
 
-  /// Timeout for WebRTC ICE gathering
-  static const int iceGatheringTimeoutSeconds = 15;
+  /// Timeout for WebRTC ICE gathering.
+  /// 10s is needed for 5G/mobile networks where TURN relay candidates
+  /// (critical for CGNAT traversal) can take longer to arrive.
+  static const int iceGatheringTimeoutSeconds = 10;
 
   /// Interval for polling signaling server
   static const int signalingPollIntervalSeconds = 5;

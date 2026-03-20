@@ -262,6 +262,20 @@ class WebRTCClientSession extends WebRTCBaseHandler {
         debugPrint('Client: Hard resetting WebRTC stack...');
         await forceRecreatePC();
         didRecreatePC = true;
+
+        // Re-initialize the session mailbox so an expired backend session
+        // doesn't prevent the client from posting/reading answers.
+        try {
+          await signaler.initializeSession(
+            uuid: sessionUuid!,
+            peerId: 'client',
+            role: 'answerer',
+          );
+          debugPrint('Client: Session mailbox refreshed on server.');
+        } catch (e) {
+          debugPrint('Client: Warning — could not refresh session mailbox: $e');
+        }
+
         await Future.delayed(
             Duration(seconds: AppConfig.signalingMinimumIntervalSeconds));
       }

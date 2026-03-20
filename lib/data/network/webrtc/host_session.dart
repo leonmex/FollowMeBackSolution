@@ -283,6 +283,20 @@ class WebRTCHostSession extends WebRTCBaseHandler {
         );
         await forceRecreatePC();
 
+        // Re-initialize the session mailbox so a backend TTL expiry or
+        // server-side cleanup doesn't leave the host invisible to the client.
+        try {
+          await signaler.initializeSession(
+            uuid: sessionUuid!,
+            peerId: 'host',
+            role: 'offerer',
+          );
+          debugPrint('Host: Session mailbox refreshed on server.');
+        } catch (e) {
+          debugPrint('Host: Warning — could not refresh session mailbox: $e');
+          // Non-fatal: the postData call below will expose the real failure.
+        }
+
         // Re-create data channel — host always owns it
         final dcInit = RTCDataChannelInit()..ordered = true;
         final channel = await peerConnection!.createDataChannel(
