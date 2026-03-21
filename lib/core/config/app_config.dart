@@ -18,18 +18,16 @@ class AppConfig {
   /// The Go backend config.json still has the placeholder "yourdomain.com";
   /// this value substitutes it on the Flutter side until the backend is updated.
   /// Set to null once the backend config is corrected.
-  static const String? turnPublicHostname =
-      '<NEW_FOLLOW_ME_BACK_SERVER_HOSTNAME>';
+  static const String? turnPublicHostname = '<TURN_SERVER_IP>';
 
   /// WebRTC DataChannel Keep-alive ping interval
   static const int keepAlivePingIntervalSeconds = 20;
 
   /// Number of previous locations to save from the client
-  static const int maxClientLocationsToSave = 20;
+  static const int maxClientLocationsToSave = 200;
 
   /// Cloud function for exchanging SDPs during ICE Restarts
-  static const String restablishCommunicationUrl =
-      '<restablishCommunicationUrl>';
+  static const String restablishCommunicationUrl = '<CLOUD_FUNCTION_URL>';
 
   /// Timeout for HTTP signaling requests
   static const int signalingTimeoutSeconds = 10;
