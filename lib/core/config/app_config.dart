@@ -1,6 +1,5 @@
 class AppConfig {
   /// FollowMeBack REST API URL for fetching TURN credentials
-<<<<<<< HEAD
   static const String followMeBackRestUrl = '<followMeBackRestUrl>';
 
   /// FollowMeBack API Key
@@ -10,38 +9,26 @@ class AppConfig {
   static const bool useApiV1Webrtc = true;
 
   /// Base URL for the new WebRTC API v1 endpoints
-  static const String apiV1BaseUrl = '<NEW_TURN_FOLLOW_ME_BACK_SERVER>';
+  static const String apiV1BaseUrl = '<apiV1BaseUrl>';
 
   /// API Key for the new WebRTC API v1
-  static const String apiV1ApiKey = '<API_KEY_FOLLOW_ME_BACK_SERVER>';
+  static const String apiV1ApiKey = 'your_api_secret_token';
 
   /// Public hostname/IP of the Coturn TURN server.
   /// The Go backend config.json still has the placeholder "yourdomain.com";
   /// this value substitutes it on the Flutter side until the backend is updated.
   /// Set to null once the backend config is corrected.
-  static const String? turnPublicHostname = '<TURN_SERVER_IP>';
-=======
-  static const String followMeBackRestUrl =
-      'https://followmeback.metered.live/api/v1/turn/credentials';
-
-  /// FollowMeBack API Key
-  static const String followMeBackApiKey =
-      '24a75e97d644fcef2badc928762c1cc2fbc1';
->>>>>>> df8dc83 (feat: Credentials for Prod - Don't use or merge)
+  static const String? turnPublicHostname = '<turnPublicHostname>';
 
   /// WebRTC DataChannel Keep-alive ping interval
   static const int keepAlivePingIntervalSeconds = 20;
 
   /// Number of previous locations to save from the client
-  static const int maxClientLocationsToSave = 200;
+  static const int maxClientLocationsToSave = 20;
 
   /// Cloud function for exchanging SDPs during ICE Restarts
-<<<<<<< HEAD
-  static const String restablishCommunicationUrl = '<CLOUD_FUNCTION_URL>';
-=======
   static const String restablishCommunicationUrl =
-      'https://europe-west1-mexican-fans.cloudfunctions.net/RestablishComunicationFMB';
->>>>>>> df8dc83 (feat: Credentials for Prod - Don't use or merge)
+      '<restablishCommunicationUrl>';
 
   /// Timeout for HTTP signaling requests
   static const int signalingTimeoutSeconds = 10;
