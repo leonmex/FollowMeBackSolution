@@ -1,5 +1,6 @@
 class AppConfig {
   /// FollowMeBack REST API URL for fetching TURN credentials
+<<<<<<< HEAD
   static const String followMeBackRestUrl = '<followMeBackRestUrl>';
 
   /// FollowMeBack API Key
@@ -19,6 +20,14 @@ class AppConfig {
   /// this value substitutes it on the Flutter side until the backend is updated.
   /// Set to null once the backend config is corrected.
   static const String? turnPublicHostname = '<TURN_SERVER_IP>';
+=======
+  static const String followMeBackRestUrl =
+      'https://followmeback.metered.live/api/v1/turn/credentials';
+
+  /// FollowMeBack API Key
+  static const String followMeBackApiKey =
+      '24a75e97d644fcef2badc928762c1cc2fbc1';
+>>>>>>> df8dc83 (feat: Credentials for Prod - Don't use or merge)
 
   /// WebRTC DataChannel Keep-alive ping interval
   static const int keepAlivePingIntervalSeconds = 20;
@@ -27,7 +36,12 @@ class AppConfig {
   static const int maxClientLocationsToSave = 200;
 
   /// Cloud function for exchanging SDPs during ICE Restarts
+<<<<<<< HEAD
   static const String restablishCommunicationUrl = '<CLOUD_FUNCTION_URL>';
+=======
+  static const String restablishCommunicationUrl =
+      'https://europe-west1-mexican-fans.cloudfunctions.net/RestablishComunicationFMB';
+>>>>>>> df8dc83 (feat: Credentials for Prod - Don't use or merge)
 
   /// Timeout for HTTP signaling requests
   static const int signalingTimeoutSeconds = 10;
